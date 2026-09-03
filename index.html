@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BANDERSNATCH // TUCKERSOFT TERMINAL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<canvas id="scanlines"></canvas>
+
+<!-- ===================== SCREEN 1: CONNECT ===================== -->
+<section id="screen-connect" class="screen active">
+  <div class="terminal-card">
+    <div class="terminal-head">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="terminal-title">TUCKERSOFT REMOTE TERMINAL</span>
+    </div>
+    <div class="terminal-body">
+      <pre id="boot-log" class="boot-log"></pre>
+
+      <form id="form-connect" class="term-form hidden">
+        <label class="term-label">SERVER ADDRESS</label>
+        <input id="input-server" class="term-input" type="text" placeholder="http://192.168.1.50:8096" autocomplete="url" required>
+        <div class="term-error" id="error-connect"></div>
+        <button type="submit" class="btn-primary">
+          <span class="btn-label">CONNECT</span>
+        </button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN 2: LOGIN ===================== -->
+<section id="screen-login" class="screen">
+  <div class="terminal-card">
+    <div class="terminal-head">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="terminal-title" id="login-server-label">SERVER</span>
+    </div>
+    <div class="terminal-body">
+      <form id="form-login" class="term-form">
+        <label class="term-label">USERNAME</label>
+        <input id="input-username" class="term-input" type="text" autocomplete="username" required>
+        <label class="term-label">PASSWORD</label>
+        <input id="input-password" class="term-input" type="password" autocomplete="current-password">
+        <div class="term-error" id="error-login"></div>
+        <button type="submit" class="btn-primary">
+          <span class="btn-label">AUTHENTICATE</span>
+        </button>
+        <button type="button" class="btn-ghost" id="btn-back-to-connect">&larr; different server</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN 3: LOCATING TITLE ===================== -->
+<section id="screen-locating" class="screen">
+  <div class="terminal-card">
+    <div class="terminal-body">
+      <pre id="locating-log" class="boot-log"></pre>
+      <div id="search-fallback" class="term-form hidden">
+        <label class="term-label">SEARCH YOUR LIBRARY</label>
+        <input id="input-search" class="term-input" type="text" placeholder="Type a title..." value="Bandersnatch">
+        <button type="button" id="btn-search" class="btn-primary"><span class="btn-label">SEARCH</span></button>
+        <div id="search-results" class="search-results"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN 4: TITLE POPUP ===================== -->
+<section id="screen-title" class="screen">
+  <div class="backdrop-blur" id="title-backdrop"></div>
+  <div class="title-card">
+    <div class="poster-frame">
+      <img id="title-poster" alt="">
+      <div class="poster-glitch"></div>
+    </div>
+    <div class="title-meta">
+      <h1 id="title-name">BANDERSNATCH</h1>
+      <p class="title-sub">AN INTERACTIVE FILM &mdash; YOUR CHOICES SHAPE THE STORY</p>
+      <button id="btn-play" class="btn-primary btn-large">
+        <span class="btn-label">BEGIN THE EXPERIENCE</span>
+      </button>
+      <button id="btn-logout" class="btn-ghost">log out</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN 5: PLAYER ===================== -->
+<section id="screen-player" class="screen">
+  <video id="video" playsinline></video>
+
+  <div class="player-chrome" id="player-chrome">
+    <div class="chrome-top">
+      <button id="btn-exit" class="chrome-btn" title="Exit">&times;</button>
+      <span id="segment-readout" class="segment-readout"></span>
+    </div>
+    <div class="chrome-bottom">
+      <button id="btn-playpause" class="chrome-btn" title="Play/Pause">&#10073;&#10073;</button>
+      <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+      <span id="time-readout" class="time-readout">00:00 / 00:00</span>
+    </div>
+  </div>
+
+  <!-- Choice overlay -->
+  <div id="choice-overlay" class="choice-overlay hidden">
+    <div class="choice-title" id="choice-title"></div>
+    <div class="choice-grid" id="choice-grid"></div>
+    <div class="choice-timer-track"><div id="choice-timer-fill" class="choice-timer-fill"></div></div>
+  </div>
+
+  <!-- Ending overlay -->
+  <div id="ending-overlay" class="ending-overlay hidden">
+    <div class="ending-card">
+      <h2 id="ending-heading">BRANCH COMPLETE</h2>
+      <p id="ending-sub">This path has run its course.</p>
+      <div class="ending-actions">
+        <button id="btn-restart" class="btn-primary"><span class="btn-label">RESTART FROM THE BEGINNING</span></button>
+        <button id="btn-continue" class="btn-ghost hidden">let it keep playing &rarr;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cut-transition flash -->
+  <div id="cut-flash" class="cut-flash"></div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script src="segment-map.js"></script>
+<script src="choice-labels.js"></script>
+<script src="segment-engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
