@@ -93,7 +93,7 @@
 
 <!-- ===================== SCREEN 5: PLAYER ===================== -->
 <section id="screen-player" class="screen">
-  <video id="video" playsinline></video>
+  <video id="video" playsinline crossorigin="anonymous"></video>
 
   <div class="player-chrome" id="player-chrome">
     <div class="chrome-top">
@@ -101,9 +101,18 @@
       <span id="segment-readout" class="segment-readout"></span>
     </div>
     <div class="chrome-bottom">
+      <button id="btn-back10" class="chrome-btn" title="Back 10s">&#8634; 10s</button>
       <button id="btn-playpause" class="chrome-btn" title="Play/Pause">&#10073;&#10073;</button>
-      <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+      <button id="btn-fwd10" class="chrome-btn" title="Forward 10s">&#8635; 10s</button>
+      
+      <div class="progress-track" id="progress-track" title="Seek timeline">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+      
       <span id="time-readout" class="time-readout">00:00 / 00:00</span>
+      <select id="select-subtitles" class="chrome-select" title="Subtitles">
+        <option value="-1">Subtitles: Off</option>
+      </select>
     </div>
   </div>
 

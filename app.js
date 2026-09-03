@@ -154,7 +154,7 @@ document.getElementById('btn-back-to-connect').addEventListener('click', () => {
 });
 
 /* =====================================================================
-   SCREEN 3 — Locating the title (no manual ID entry, ever)
+   SCREEN 3 — Locating the title
    ===================================================================== */
 const locatingLog = document.getElementById('locating-log');
 const searchFallback = document.getElementById('search-fallback');
@@ -258,9 +258,13 @@ const choiceGrid = document.getElementById('choice-grid');
 const choiceTimerFill = document.getElementById('choice-timer-fill');
 const endingOverlay = document.getElementById('ending-overlay');
 const cutFlash = document.getElementById('cut-flash');
+const selectSubtitles = document.getElementById('select-subtitles');
+const progressTrack = document.getElementById('progress-track');
+
 let engine = null;
 let playSessionId = null;
 let progressTimer = null;
+let isDraggingScrubber = false;
 
 async function startPlayback(item) {
   showScreen('screen-player');
@@ -271,12 +275,12 @@ async function startPlayback(item) {
     body: {
       UserId: session.userId,
       DeviceProfile: {
-        MaxStreamingBitrate: 120000000,
+        MaxStreamingBitrate: 140000000,
         DirectPlayProfiles: [
           { Container: 'mkv,mp4,webm', Type: 'Video', VideoCodec: 'h264,hevc,vp9,av1', AudioCodec: 'aac,ac3,eac3,mp3,opus,flac' },
         ],
         TranscodingProfiles: [
-          { Container: 'ts', Type: 'Video', VideoCodec: 'h264', AudioCodec: 'aac', Context: 'Streaming', Protocol: 'hls' },
+          { Container: 'ts', Type: 'Video', VideoCodec: 'h264', AudioCodec: 'aac', Context: 'Streaming', Protocol: 'hls', MaxAudioChannels: '6' },
         ],
       },
     },
@@ -286,15 +290,39 @@ async function startPlayback(item) {
   playSessionId = playbackInfo.PlaySessionId;
   const base = session.server.replace(/\/+$/, '');
   let src;
+
+  // Preserve native 1080p / 4K resolution and high bitrate if transcoding
   if (source.SupportsDirectPlay) {
     src = `${base}/Videos/${item.Id}/stream?static=true&mediaSourceId=${encodeURIComponent(source.Id)}&api_key=${session.token}`;
   } else {
-    src = `${base}/Videos/${item.Id}/master.m3u8?mediaSourceId=${encodeURIComponent(source.Id)}&api_key=${session.token}&VideoCodec=h264&AudioCodec=aac`;
+    src = `${base}/Videos/${item.Id}/master.m3u8?mediaSourceId=${encodeURIComponent(source.Id)}&api_key=${session.token}&VideoCodec=h264&AudioCodec=aac&MaxWidth=3840&MaxHeight=2160&VideoBitrate=120000000&AudioBitrate=384000`;
   }
+
+  // Setup Subtitle Tracks from Jellyfin media source
+  while (video.firstChild) {
+    video.removeChild(video.firstChild);
+  }
+  selectSubtitles.innerHTML = '<option value="-1">Subtitles: Off</option>';
+
+  const subStreams = (source.MediaStreams || []).filter(s => s.Type === 'Subtitle');
+  subStreams.forEach((sub) => {
+    const track = document.createElement('track');
+    track.kind = 'subtitles';
+    track.label = sub.DisplayTitle || sub.Language || `Track ${sub.Index}`;
+    track.srclang = sub.Language || 'en';
+    track.src = `${base}/Videos/${item.Id}/${source.Id}/Subtitles/${sub.Index}/Stream.vtt?api_key=${session.token}`;
+    if (sub.IsDefault) track.default = true;
+    video.appendChild(track);
+
+    const opt = document.createElement('option');
+    opt.value = sub.Index;
+    opt.textContent = `CC: ${track.label}`;
+    selectSubtitles.appendChild(opt);
+  });
 
   await new Promise((resolve, reject) => {
     if (src.includes('.m3u8') && !video.canPlayType('application/vnd.apple.mpegurl') && window.Hls) {
-      const hls = new Hls();
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, resolve);
@@ -336,10 +364,7 @@ async function startPlayback(item) {
     onChoiceClear: () => {
       choiceOverlay.classList.add('hidden');
     },
-    onStoryEnd: () => {
-      // The path has reached a narrative ending; the film usually
-      // rolls on into a splitscreen / credits segment by itself.
-    },
+    onStoryEnd: () => {},
     onCredits: () => {
       showEnding('THE END', 'Roll credits, or jump back to the start.', { showContinue: true });
     },
@@ -353,21 +378,75 @@ async function startPlayback(item) {
   chrome_.addEventListener('mousemove', () => chrome_.classList.add('show'));
 }
 
+/* =====================================================================
+   Controls & Scrubbing
+   ===================================================================== */
 function updateScrubber() {
-  if (!video.duration) return;
+  if (!video.duration || isDraggingScrubber) return;
   document.getElementById('progress-fill').style.width = (video.currentTime / video.duration * 100) + '%';
   document.getElementById('time-readout').textContent =
     fmtTime(video.currentTime) + ' / ' + fmtTime(video.duration);
 }
+
 function fmtTime(s) {
   s = Math.floor(s || 0);
   const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
   return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
 }
 
-document.getElementById('btn-playpause').addEventListener('click', () => {
-  if (video.paused) video.play(); else video.pause();
+function seekFromEvent(e) {
+  const rect = progressTrack.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  if (video.duration) {
+    video.currentTime = ratio * video.duration;
+    document.getElementById('progress-fill').style.width = (ratio * 100) + '%';
+  }
+}
+
+progressTrack.addEventListener('mousedown', (e) => {
+  isDraggingScrubber = true;
+  seekFromEvent(e);
 });
+window.addEventListener('mousemove', (e) => {
+  if (isDraggingScrubber) seekFromEvent(e);
+});
+window.addEventListener('mouseup', () => {
+  isDraggingScrubber = false;
+});
+
+// Skip backward / forward 10s
+document.getElementById('btn-back10').addEventListener('click', () => {
+  video.currentTime = Math.max(0, video.currentTime - 10);
+});
+document.getElementById('btn-fwd10').addEventListener('click', () => {
+  video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
+});
+
+// Play / Pause toggle
+document.getElementById('btn-playpause').addEventListener('click', () => {
+  if (video.paused) {
+    video.play();
+    document.getElementById('btn-playpause').innerHTML = '&#10073;&#10073;';
+  } else {
+    video.pause();
+    document.getElementById('btn-playpause').innerHTML = '&#9654;';
+  }
+});
+video.addEventListener('play', () => {
+  document.getElementById('btn-playpause').innerHTML = '&#10073;&#10073;';
+});
+video.addEventListener('pause', () => {
+  document.getElementById('btn-playpause').innerHTML = '&#9654;';
+});
+
+// Subtitle switcher
+selectSubtitles.addEventListener('change', (e) => {
+  const idx = e.target.selectedIndex - 1;
+  for (let i = 0; i < video.textTracks.length; i++) {
+    video.textTracks[i].mode = (i === idx) ? 'showing' : 'disabled';
+  }
+});
+
 document.getElementById('btn-exit').addEventListener('click', stopPlayback);
 
 function showEnding(heading, sub, { showContinue }) {
@@ -394,7 +473,7 @@ function stopPlayback() {
   showScreen('screen-title');
 }
 
-/* --- Best-effort Jellyfin "now playing" session reporting (non-blocking) --- */
+/* --- Best-effort Jellyfin "now playing" session reporting --- */
 function reportPlaying(itemId, mediaSourceId) {
   jf('/Sessions/Playing', { method: 'POST', body: {
     ItemId: itemId, MediaSourceId: mediaSourceId, PlaySessionId: playSessionId, CanSeek: true,
@@ -418,7 +497,6 @@ function reportStopped() {
    Boot
    ===================================================================== */
 (function boot() {
-  // Scanline canvas
   const c = document.getElementById('scanlines');
   const ctx = c.getContext('2d');
   function drawScanlines() {
