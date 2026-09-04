@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>BANDERSNATCH // TUCKERSOFT TERMINAL</title>
+<title>BANDERSNATCH</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -93,26 +93,23 @@
 
 <!-- ===================== SCREEN 5: PLAYER ===================== -->
 <section id="screen-player" class="screen">
-  <video id="video" playsinline crossorigin="anonymous"></video>
+  <video id="video" playsinline></video>
 
   <div class="player-chrome" id="player-chrome">
     <div class="chrome-top">
       <button id="btn-exit" class="chrome-btn" title="Exit">&times;</button>
       <span id="segment-readout" class="segment-readout"></span>
+      <button id="btn-fullscreen" class="chrome-btn" title="Fullscreen">&#9974;</button>
     </div>
     <div class="chrome-bottom">
-      <button id="btn-back10" class="chrome-btn" title="Back 10s">&#8634; 10s</button>
-      <button id="btn-playpause" class="chrome-btn" title="Play/Pause">&#10073;&#10073;</button>
-      <button id="btn-fwd10" class="chrome-btn" title="Forward 10s">&#8635; 10s</button>
-      
-      <div class="progress-track" id="progress-track" title="Seek timeline">
-        <div id="progress-fill" class="progress-fill"></div>
-      </div>
-      
+      <button id="btn-playpause" class="chrome-btn" title="Play/Pause (Space)">&#10073;&#10073;</button>
+      <button id="btn-skip-back" class="chrome-btn" title="Back 10s (&larr;)">&#8634;10</button>
+      <button id="btn-skip-fwd" class="chrome-btn" title="Forward 10s (&rarr;)">10&#8635;</button>
+      <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
       <span id="time-readout" class="time-readout">00:00 / 00:00</span>
-      <select id="select-subtitles" class="chrome-select" title="Subtitles">
-        <option value="-1">Subtitles: Off</option>
-      </select>
+      <button id="btn-mute" class="chrome-btn" title="Mute (M)">&#128266;</button>
+      <input id="volume-slider" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" title="Volume (&uarr;/&darr;)">
+      <select id="subtitle-select" class="subtitle-select hidden"><option value="off">Subtitles: Off</option></select>
     </div>
   </div>
 

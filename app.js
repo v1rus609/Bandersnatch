@@ -154,7 +154,7 @@ document.getElementById('btn-back-to-connect').addEventListener('click', () => {
 });
 
 /* =====================================================================
-   SCREEN 3 — Locating the title
+   SCREEN 3 — Locating the title (no manual ID entry, ever)
    ===================================================================== */
 const locatingLog = document.getElementById('locating-log');
 const searchFallback = document.getElementById('search-fallback');
@@ -258,13 +258,9 @@ const choiceGrid = document.getElementById('choice-grid');
 const choiceTimerFill = document.getElementById('choice-timer-fill');
 const endingOverlay = document.getElementById('ending-overlay');
 const cutFlash = document.getElementById('cut-flash');
-const selectSubtitles = document.getElementById('select-subtitles');
-const progressTrack = document.getElementById('progress-track');
-
 let engine = null;
 let playSessionId = null;
 let progressTimer = null;
-let isDraggingScrubber = false;
 
 async function startPlayback(item) {
   showScreen('screen-player');
@@ -274,13 +270,29 @@ async function startPlayback(item) {
     method: 'POST',
     body: {
       UserId: session.userId,
+      // Wide, permissive profile so an ordinary MKV rip (h264/hevc +
+      // aac/ac3/dts, matroska container) qualifies for direct play —
+      // a narrow profile here is the #1 cause of an unwanted
+      // resolution-reducing transcode.
       DeviceProfile: {
-        MaxStreamingBitrate: 140000000,
+        MaxStreamingBitrate: 800000000,
         DirectPlayProfiles: [
-          { Container: 'mkv,mp4,webm', Type: 'Video', VideoCodec: 'h264,hevc,vp9,av1', AudioCodec: 'aac,ac3,eac3,mp3,opus,flac' },
+          {
+            Container: 'mkv,matroska,webm,mp4,m4v,mov,avi,ts,mpegts',
+            Type: 'Video',
+            VideoCodec: 'h264,hevc,vp9,av1,vp8,mpeg4,mpeg2video',
+            AudioCodec: 'aac,ac3,eac3,dts,truehd,flac,mp3,opus,vorbis,pcm_s16le,pcm_s24le',
+          },
         ],
         TranscodingProfiles: [
-          { Container: 'ts', Type: 'Video', VideoCodec: 'h264', AudioCodec: 'aac', Context: 'Streaming', Protocol: 'hls', MaxAudioChannels: '6' },
+          {
+            Container: 'ts', Type: 'Video', VideoCodec: 'h264', AudioCodec: 'aac',
+            Context: 'Streaming', Protocol: 'hls', MaxAudioChannels: '8',
+          },
+        ],
+        SubtitleProfiles: [
+          { Format: 'vtt', Method: 'External' },
+          { Format: 'srt', Method: 'External' },
         ],
       },
     },
@@ -290,39 +302,21 @@ async function startPlayback(item) {
   playSessionId = playbackInfo.PlaySessionId;
   const base = session.server.replace(/\/+$/, '');
   let src;
-
-  // Preserve native 1080p / 4K resolution and high bitrate if transcoding
   if (source.SupportsDirectPlay) {
     src = `${base}/Videos/${item.Id}/stream?static=true&mediaSourceId=${encodeURIComponent(source.Id)}&api_key=${session.token}`;
+  } else if (source.TranscodingUrl) {
+    // Prefer the server's own computed URL — it already reflects our
+    // DeviceProfile's bitrate/codec choices, rather than a guess.
+    src = source.TranscodingUrl.startsWith('http') ? source.TranscodingUrl : base + source.TranscodingUrl;
+    if (!src.includes('api_key=')) src += (src.includes('?') ? '&' : '?') + `api_key=${session.token}`;
   } else {
-    src = `${base}/Videos/${item.Id}/master.m3u8?mediaSourceId=${encodeURIComponent(source.Id)}&api_key=${session.token}&VideoCodec=h264&AudioCodec=aac&MaxWidth=3840&MaxHeight=2160&VideoBitrate=120000000&AudioBitrate=384000`;
+    src = `${base}/Videos/${item.Id}/master.m3u8?mediaSourceId=${encodeURIComponent(source.Id)}&api_key=${session.token}&VideoCodec=h264&AudioCodec=aac&MaxStreamingBitrate=120000000`;
   }
-
-  // Setup Subtitle Tracks from Jellyfin media source
-  while (video.firstChild) {
-    video.removeChild(video.firstChild);
-  }
-  selectSubtitles.innerHTML = '<option value="-1">Subtitles: Off</option>';
-
-  const subStreams = (source.MediaStreams || []).filter(s => s.Type === 'Subtitle');
-  subStreams.forEach((sub) => {
-    const track = document.createElement('track');
-    track.kind = 'subtitles';
-    track.label = sub.DisplayTitle || sub.Language || `Track ${sub.Index}`;
-    track.srclang = sub.Language || 'en';
-    track.src = `${base}/Videos/${item.Id}/${source.Id}/Subtitles/${sub.Index}/Stream.vtt?api_key=${session.token}`;
-    if (sub.IsDefault) track.default = true;
-    video.appendChild(track);
-
-    const opt = document.createElement('option');
-    opt.value = sub.Index;
-    opt.textContent = `CC: ${track.label}`;
-    selectSubtitles.appendChild(opt);
-  });
+  window.__lastSource = source; // used by subtitle setup below
 
   await new Promise((resolve, reject) => {
     if (src.includes('.m3u8') && !video.canPlayType('application/vnd.apple.mpegurl') && window.Hls) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      const hls = new Hls();
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, resolve);
@@ -334,6 +328,7 @@ async function startPlayback(item) {
     }
   });
 
+  setupSubtitles(item.Id, source);
   reportPlaying(item.Id, source.Id);
 
   engine = new BandersnatchEngine(video, SegmentMap, CHOICE_LABELS, {
@@ -350,7 +345,7 @@ async function startPlayback(item) {
         const b = document.createElement('button');
         b.className = 'choice-btn';
         b.textContent = opt.label;
-        b.addEventListener('click', () => select(opt.target));
+        b.addEventListener('click', () => select(opt.targets));
         choiceGrid.appendChild(b);
       });
       choiceTimerFill.style.transition = 'none';
@@ -363,8 +358,12 @@ async function startPlayback(item) {
     },
     onChoiceClear: () => {
       choiceOverlay.classList.add('hidden');
+      resetHideTimer();
     },
-    onStoryEnd: () => {},
+    onStoryEnd: () => {
+      // The path has reached a narrative ending; the film usually
+      // rolls on into a splitscreen / credits segment by itself.
+    },
     onCredits: () => {
       showEnding('THE END', 'Roll credits, or jump back to the start.', { showContinue: true });
     },
@@ -375,79 +374,226 @@ async function startPlayback(item) {
   engine.start();
 
   video.addEventListener('timeupdate', updateScrubber);
-  chrome_.addEventListener('mousemove', () => chrome_.classList.add('show'));
+  initAutoHideChrome();
+  initVolume();
 }
 
-/* =====================================================================
-   Controls & Scrubbing
-   ===================================================================== */
 function updateScrubber() {
-  if (!video.duration || isDraggingScrubber) return;
+  if (!video.duration || scrubbing) return;
   document.getElementById('progress-fill').style.width = (video.currentTime / video.duration * 100) + '%';
   document.getElementById('time-readout').textContent =
     fmtTime(video.currentTime) + ' / ' + fmtTime(video.duration);
 }
-
 function fmtTime(s) {
   s = Math.floor(s || 0);
   const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
   return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
 }
 
-function seekFromEvent(e) {
-  const rect = progressTrack.getBoundingClientRect();
-  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  if (video.duration) {
-    video.currentTime = ratio * video.duration;
-    document.getElementById('progress-fill').style.width = (ratio * 100) + '%';
-  }
+document.getElementById('btn-playpause').addEventListener('click', () => {
+  if (video.paused) video.play(); else video.pause();
+});
+document.getElementById('btn-exit').addEventListener('click', stopPlayback);
+
+/* --- Fullscreen: the whole player screen, not just <video> --- */
+const playerScreen = document.getElementById('screen-player');
+const btnFullscreen = document.getElementById('btn-fullscreen');
+
+function isFullscreen() {
+  return document.fullscreenElement || document.webkitFullscreenElement;
+}
+function enterFullscreen() {
+  if (playerScreen.requestFullscreen) playerScreen.requestFullscreen();
+  else if (playerScreen.webkitRequestFullscreen) playerScreen.webkitRequestFullscreen();
+  else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen(); // iOS Safari: video-only fallback
+}
+function exitFullscreen() {
+  if (document.exitFullscreen) document.exitFullscreen();
+  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+}
+function toggleFullscreen() {
+  isFullscreen() ? exitFullscreen() : enterFullscreen();
+}
+btnFullscreen.addEventListener('click', toggleFullscreen);
+video.addEventListener('dblclick', toggleFullscreen);
+document.addEventListener('fullscreenchange', () => {
+  btnFullscreen.classList.toggle('is-fullscreen', !!isFullscreen());
+});
+document.addEventListener('webkitfullscreenchange', () => {
+  btnFullscreen.classList.toggle('is-fullscreen', !!isFullscreen());
+});
+
+/* --- Auto-hide controls (shows on movement, hides after inactivity
+   while playing — pauses stay visible, matching normal players) --- */
+let hideTimer = null;
+function showChromeNow() {
+  chrome_.classList.add('show');
+  playerScreen.classList.remove('cursor-hidden');
+  resetHideTimer();
+}
+function resetHideTimer() {
+  clearTimeout(hideTimer);
+  if (video.paused || !choiceOverlay.classList.contains('hidden')) return; // stay visible
+  hideTimer = setTimeout(() => {
+    chrome_.classList.remove('show');
+    playerScreen.classList.add('cursor-hidden');
+  }, 2800);
+}
+function initAutoHideChrome() {
+  playerScreen.addEventListener('mousemove', showChromeNow);
+  playerScreen.addEventListener('touchstart', showChromeNow, { passive: true });
+  video.addEventListener('play', resetHideTimer);
+  video.addEventListener('pause', () => { chrome_.classList.add('show'); clearTimeout(hideTimer); });
+  showChromeNow();
 }
 
-progressTrack.addEventListener('mousedown', (e) => {
-  isDraggingScrubber = true;
-  seekFromEvent(e);
-});
-window.addEventListener('mousemove', (e) => {
-  if (isDraggingScrubber) seekFromEvent(e);
-});
-window.addEventListener('mouseup', () => {
-  isDraggingScrubber = false;
-});
+/* --- Keyboard shortcuts (space, arrows, mute, fullscreen) --- */
+document.addEventListener('keydown', (e) => {
+  if (!playerScreen.classList.contains('active')) return;
+  const tag = (document.activeElement && document.activeElement.tagName) || '';
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag)) return; // don't hijack typing
 
-// Skip backward / forward 10s
-document.getElementById('btn-back10').addEventListener('click', () => {
-  video.currentTime = Math.max(0, video.currentTime - 10);
-});
-document.getElementById('btn-fwd10').addEventListener('click', () => {
-  video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
-});
-
-// Play / Pause toggle
-document.getElementById('btn-playpause').addEventListener('click', () => {
-  if (video.paused) {
-    video.play();
-    document.getElementById('btn-playpause').innerHTML = '&#10073;&#10073;';
-  } else {
-    video.pause();
-    document.getElementById('btn-playpause').innerHTML = '&#9654;';
+  switch (e.key) {
+    case ' ':
+    case 'k':
+      e.preventDefault();
+      video.paused ? video.play() : video.pause();
+      showChromeNow();
+      break;
+    case 'ArrowLeft': {
+      e.preventDefault();
+      const targetMs = Math.max(0, video.currentTime * 1000 - 10000);
+      engine ? engine.seekToTime(targetMs) : (video.currentTime -= 10);
+      showChromeNow();
+      break;
+    }
+    case 'ArrowRight': {
+      e.preventDefault();
+      const targetMs = Math.min((video.duration || Infinity) * 1000, video.currentTime * 1000 + 10000);
+      engine ? engine.seekToTime(targetMs) : (video.currentTime += 10);
+      showChromeNow();
+      break;
+    }
+    case 'ArrowUp':
+      e.preventDefault();
+      setVolume(Math.min(1, video.volume + 0.1));
+      showChromeNow();
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      setVolume(Math.max(0, video.volume - 0.1));
+      showChromeNow();
+      break;
+    case 'm':
+    case 'M':
+      toggleMute();
+      showChromeNow();
+      break;
+    case 'f':
+    case 'F':
+      toggleFullscreen();
+      break;
   }
 });
-video.addEventListener('play', () => {
-  document.getElementById('btn-playpause').innerHTML = '&#10073;&#10073;';
+
+/* --- Volume / mute --- */
+const volumeSlider = document.getElementById('volume-slider');
+const btnMute = document.getElementById('btn-mute');
+
+function setVolume(v) {
+  video.volume = v;
+  video.muted = v === 0;
+  volumeSlider.value = v;
+  btnMute.textContent = v === 0 ? '\u{1F507}' : (v < 0.5 ? '\u{1F509}' : '\u{1F50A}');
+  saveSession({ volume: v });
+}
+function toggleMute() {
+  setVolume(video.muted || video.volume === 0 ? (session.volume || 1) : 0);
+}
+function initVolume() {
+  const startVolume = session.volume != null ? session.volume : 1;
+  setVolume(startVolume);
+  volumeSlider.addEventListener('input', () => setVolume(parseFloat(volumeSlider.value)));
+  btnMute.addEventListener('click', toggleMute);
+}
+
+/* --- Scrub bar: click/drag anywhere on the track to seek --- */
+const progressTrack = document.querySelector('.progress-track');
+const progressFill = document.getElementById('progress-fill');
+let scrubbing = false;
+
+function ratioFromEvent(e) {
+  const rect = progressTrack.getBoundingClientRect();
+  const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+  return Math.min(1, Math.max(0, x / rect.width));
+}
+function beginScrub(e) {
+  if (!video.duration) return;
+  scrubbing = true;
+  chrome_.classList.add('show');
+  moveScrub(e);
+}
+function moveScrub(e) {
+  if (!scrubbing) return;
+  const ratio = ratioFromEvent(e);
+  progressFill.style.width = (ratio * 100) + '%';
+  document.getElementById('time-readout').textContent =
+    fmtTime(ratio * video.duration) + ' / ' + fmtTime(video.duration);
+}
+function endScrub(e) {
+  if (!scrubbing) return;
+  scrubbing = false;
+  const ratio = ratioFromEvent(e);
+  const targetMs = ratio * video.duration * 1000;
+  if (engine) engine.seekToTime(targetMs); else video.currentTime = ratio * video.duration;
+}
+progressTrack.addEventListener('mousedown', beginScrub);
+addEventListener('mousemove', moveScrub);
+addEventListener('mouseup', endScrub);
+progressTrack.addEventListener('touchstart', beginScrub, { passive: true });
+addEventListener('touchmove', moveScrub, { passive: true });
+addEventListener('touchend', endScrub);
+
+/* --- Skip back/forward 10s --- */
+document.getElementById('btn-skip-back').addEventListener('click', () => {
+  const targetMs = Math.max(0, video.currentTime * 1000 - 10000);
+  if (engine) engine.seekToTime(targetMs); else video.currentTime -= 10;
 });
-video.addEventListener('pause', () => {
-  document.getElementById('btn-playpause').innerHTML = '&#9654;';
+document.getElementById('btn-skip-fwd').addEventListener('click', () => {
+  const targetMs = Math.min((video.duration || Infinity) * 1000, video.currentTime * 1000 + 10000);
+  if (engine) engine.seekToTime(targetMs); else video.currentTime += 10;
 });
 
-// Subtitle switcher
-selectSubtitles.addEventListener('change', (e) => {
-  const idx = e.target.selectedIndex - 1;
-  for (let i = 0; i < video.textTracks.length; i++) {
-    video.textTracks[i].mode = (i === idx) ? 'showing' : 'disabled';
-  }
-});
+/* --- Subtitles --- */
+function setupSubtitles(itemId, source) {
+  document.querySelectorAll('#video track').forEach(t => t.remove());
+  const base = session.server.replace(/\/+$/, '');
+  const subStreams = (source.MediaStreams || []).filter(s => s.Type === 'Subtitle');
+  const select = document.getElementById('subtitle-select');
+  select.innerHTML = '<option value="off">Subtitles: Off</option>';
+  subStreams.forEach(s => {
+    const track = document.createElement('track');
+    track.kind = 'subtitles';
+    track.label = s.DisplayTitle || s.Language || `Track ${s.Index}`;
+    track.srclang = s.Language || 'und';
+    track.src = `${base}/Videos/${itemId}/${source.Id}/Subtitles/${s.Index}/Stream.vtt?api_key=${session.token}`;
+    track.dataset.index = s.Index;
+    video.appendChild(track);
 
-document.getElementById('btn-exit').addEventListener('click', stopPlayback);
+    const opt = document.createElement('option');
+    opt.value = s.Index;
+    opt.textContent = track.label;
+    select.appendChild(opt);
+  });
+  select.classList.toggle('hidden', subStreams.length === 0);
+  select.onchange = () => {
+    Array.from(video.textTracks).forEach(tt => { tt.mode = 'hidden'; });
+    if (select.value !== 'off') {
+      const tt = Array.from(video.textTracks).find((_, i) => String(subStreams[i].Index) === select.value);
+      if (tt) tt.mode = 'showing';
+    }
+  };
+}
 
 function showEnding(heading, sub, { showContinue }) {
   document.getElementById('ending-heading').textContent = heading;
@@ -473,7 +619,7 @@ function stopPlayback() {
   showScreen('screen-title');
 }
 
-/* --- Best-effort Jellyfin "now playing" session reporting --- */
+/* --- Best-effort Jellyfin "now playing" session reporting (non-blocking) --- */
 function reportPlaying(itemId, mediaSourceId) {
   jf('/Sessions/Playing', { method: 'POST', body: {
     ItemId: itemId, MediaSourceId: mediaSourceId, PlaySessionId: playSessionId, CanSeek: true,
@@ -497,6 +643,7 @@ function reportStopped() {
    Boot
    ===================================================================== */
 (function boot() {
+  // Scanline canvas
   const c = document.getElementById('scanlines');
   const ctx = c.getContext('2d');
   function drawScanlines() {

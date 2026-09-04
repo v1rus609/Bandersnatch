@@ -231,7 +231,6 @@ a{ color: var(--amber); }
   opacity:0;
   transition: opacity .25s ease;
 }
-#screen-player:hover .player-chrome,
 .player-chrome.show{ opacity:1; }
 
 .chrome-top, .chrome-bottom{
@@ -240,6 +239,8 @@ a{ color: var(--amber); }
   pointer-events:auto;
   background: linear-gradient(180deg, rgba(0,0,0,.65), transparent);
 }
+.player-chrome:not(.show) .chrome-top,
+.player-chrome:not(.show) .chrome-bottom{ pointer-events:none; }
 .chrome-bottom{ background: linear-gradient(0deg, rgba(0,0,0,.7), transparent); }
 
 .chrome-btn{
@@ -252,9 +253,28 @@ a{ color: var(--amber); }
 }
 .progress-track{
   flex:1; height:3px; background: rgba(255,255,255,.15); border-radius:2px; overflow:hidden;
+  cursor:pointer; position:relative;
 }
-.progress-fill{ height:100%; width:0%; background: var(--amber); }
+.progress-track::before{
+  content:''; position:absolute; inset:-6px 0; /* wider invisible hit area */
+}
+.progress-fill{ height:100%; width:0%; background: var(--amber); pointer-events:none; }
 .time-readout{ font-size: 11.5px; color: var(--paper-dim); min-width: 96px; text-align:right; }
+
+.subtitle-select{
+  background:#000; color: var(--paper); border: 1px solid var(--amber-faint);
+  border-radius: var(--radius); font-size: 11px; padding: 4px 6px;
+}
+.subtitle-select.hidden{ display:none; }
+.volume-slider{
+  width: 90px; accent-color: var(--amber);
+  background: transparent;
+}
+
+#screen-player.cursor-hidden{ cursor: none; }
+#btn-skip-back, #btn-skip-fwd{ font-size: 12px; letter-spacing:.02em; }
+#screen-player:fullscreen{ width:100vw; height:100vh; }
+#screen-player:-webkit-full-screen{ width:100vw; height:100vh; }
 
 /* ---------- Choice overlay ---------- */
 .choice-overlay{
@@ -341,66 +361,4 @@ a{ color: var(--amber); }
   .title-meta h1{ font-size: 42px; }
   .choice-title{ font-size: 22px; }
   .choice-overlay{ padding-top: 8vh; }
-}
-/* Append or replace the player control styles in style.css */
-.chrome-bottom {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 20px;
-  pointer-events: auto;
-  background: linear-gradient(0deg, rgba(0,0,0,.85), transparent);
-}
-
-.chrome-btn {
-  background: none;
-  border: 1px solid transparent;
-  color: var(--paper);
-  font-size: 13px;
-  line-height: 1;
-  opacity: .85;
-  padding: 6px 8px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.chrome-btn:hover {
-  opacity: 1;
-  color: var(--amber);
-  border-color: var(--amber-dim);
-}
-
-.chrome-select {
-  background: #000;
-  border: 1px solid var(--amber-dim);
-  color: var(--paper);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 4px 6px;
-  border-radius: var(--radius);
-  outline: none;
-}
-.chrome-select:focus {
-  border-color: var(--amber);
-}
-
-.progress-track {
-  flex: 1;
-  height: 8px;
-  background: rgba(255, 255, 255, .15);
-  border-radius: 4px;
-  position: relative;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-}
-.progress-track:hover {
-  height: 10px;
-}
-.progress-fill {
-  height: 100%;
-  width: 0%;
-  background: var(--amber);
-  border-radius: 4px;
-  pointer-events: none;
 }

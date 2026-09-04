@@ -93,8 +93,49 @@ player shows the current segment ID to make this easy):
   `bandersnatch.js` (preconditions, "remembered" choices affecting
   later scenes, respawn logic) — that's a large additional project on
   top of this if you want full parity.
-- Direct-play works best if your file is already H.264/AAC in an MKV
-  container; more exotic codecs will fall back to server-side
-  transcoding via HLS (needs a reasonably capable Jellyfin server).
 - Session reporting to Jellyfin ("now playing") is best-effort and
   silently ignored if it fails — it won't block playback.
+
+## Fixing "video freezes but audio keeps playing" on branch cuts
+
+This is a keyframe alignment issue, not a bug in the app itself:
+seeking to a timestamp that isn't a keyframe means the decoder has to
+wait for the next keyframe before it can show a correct frame, while
+audio has no such restriction — so audio visibly moves ahead for a
+moment. If your file wasn't authored (or concatenated) with a
+keyframe at every branch point, you'll see this on cuts.
+
+Run:
+```bash
+node generate-keyframe-fix.js > reencode.sh
+```
+This reads every branch-point timestamp out of `segment-map.js` and
+writes an `ffmpeg` command that forces a keyframe at each one (video
+re-encoded, audio stream-copied). Edit the `INPUT`/`OUTPUT` paths at
+the top of `reencode.sh`, then run it. Point Jellyfin at the new file
+afterward. It's a full re-encode so expect it to take a while
+depending on your hardware — `-preset medium -crf 18` is a reasonable
+quality/speed balance; adjust as you like.
+
+## What changed since the first version
+
+- **Full resolution**: the original `DeviceProfile` sent to Jellyfin
+  was too narrow (missed `matroska` as a container name, among other
+  gaps), so a lot of setups were silently falling back to a low-quality
+  transcode. It's now much more permissive and should direct-play a
+  standard H.264/AAC MKV at full quality.
+- **Real choice text**: labels ("ACCEPT"/"REFUSE", "PHAEDRA"/"THE
+  BERMUDA TRIANGLE", etc.) are now pulled from `bandersnatch.js`'s
+  `momentsBySegment` + `segmentGroups` data instead of showing
+  "Option 1/2".
+- **Freeze-on-seek**: every branch/scrub now pauses, waits for the
+  browser's real `seeked` event, and only then resumes — this alone
+  fixes most of the audio/video desync. See above for the deeper
+  keyframe-alignment fix if it persists.
+- **Scrubbing**: the progress bar is now draggable (click or
+  click-and-drag), plus 10s back/forward buttons — both correctly
+  re-sync the branching engine to whichever segment owns the new
+  timestamp.
+- **Subtitles**: any subtitle tracks Jellyfin reports for the file now
+  show up in a dropdown in the player controls.
+
