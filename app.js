@@ -331,7 +331,7 @@ async function startPlayback(item) {
   setupSubtitles(item.Id, source);
   reportPlaying(item.Id, source.Id);
 
-  engine = new BandersnatchEngine(video, SegmentMap, CHOICE_LABELS, {
+  engine = new BandersnatchEngine(video, SegmentMap, STORY_DATA, {
     onSegmentChange: (id) => {
       document.getElementById('segment-readout').textContent = id;
     },
@@ -345,7 +345,7 @@ async function startPlayback(item) {
         const b = document.createElement('button');
         b.className = 'choice-btn';
         b.textContent = opt.label;
-        b.addEventListener('click', () => select(opt.targets));
+        b.addEventListener('click', () => select(opt.index));
         choiceGrid.appendChild(b);
       });
       choiceTimerFill.style.transition = 'none';
@@ -566,102 +566,32 @@ document.getElementById('btn-skip-fwd').addEventListener('click', () => {
 
 /* --- Subtitles --- */
 function setupSubtitles(itemId, source) {
-  // Clear existing tracks
   document.querySelectorAll('#video track').forEach(t => t.remove());
-  Array.from(video.textTracks).forEach(tt => { tt.mode = 'disabled'; });
-
   const base = session.server.replace(/\/+$/, '');
   const subStreams = (source.MediaStreams || []).filter(s => s.Type === 'Subtitle');
   const select = document.getElementById('subtitle-select');
   select.innerHTML = '<option value="off">Subtitles: Off</option>';
-
-  if (subStreams.length === 0) {
-    select.classList.add('hidden');
-    return;
-  }
-
   subStreams.forEach(s => {
     const track = document.createElement('track');
     track.kind = 'subtitles';
     track.label = s.DisplayTitle || s.Language || `Track ${s.Index}`;
     track.srclang = s.Language || 'und';
-    // Use the subtitle delivery URL
     track.src = `${base}/Videos/${itemId}/${source.Id}/Subtitles/${s.Index}/Stream.vtt?api_key=${session.token}`;
-    track.dataset.streamIndex = String(s.Index);
+    track.dataset.index = s.Index;
     video.appendChild(track);
 
     const opt = document.createElement('option');
-    opt.value = String(s.Index);
+    opt.value = s.Index;
     opt.textContent = track.label;
     select.appendChild(opt);
   });
-
-  select.classList.remove('hidden');
-
+  select.classList.toggle('hidden', subStreams.length === 0);
   select.onchange = () => {
-    const chosenIndex = select.value;
-    const trackElements = video.querySelectorAll('track');
-
-    trackElements.forEach(el => {
-      // Find the associated TextTrack object on the track element
-      const tt = el.track;
-      if (!tt) return;
-
-      if (chosenIndex !== 'off' && el.dataset.streamIndex === chosenIndex) {
-        tt.mode = 'showing';
-      } else {
-        tt.mode = 'disabled';
-      }
-    });
-  };
-}function setupSubtitles(itemId, source) {
-  // Clear existing tracks
-  document.querySelectorAll('#video track').forEach(t => t.remove());
-  Array.from(video.textTracks).forEach(tt => { tt.mode = 'disabled'; });
-
-  const base = session.server.replace(/\/+$/, '');
-  const subStreams = (source.MediaStreams || []).filter(s => s.Type === 'Subtitle');
-  const select = document.getElementById('subtitle-select');
-  select.innerHTML = '<option value="off">Subtitles: Off</option>';
-
-  if (subStreams.length === 0) {
-    select.classList.add('hidden');
-    return;
-  }
-
-  subStreams.forEach(s => {
-    const track = document.createElement('track');
-    track.kind = 'subtitles';
-    track.label = s.DisplayTitle || s.Language || `Track ${s.Index}`;
-    track.srclang = s.Language || 'und';
-    // Use the subtitle delivery URL
-    track.src = `${base}/Videos/${itemId}/${source.Id}/Subtitles/${s.Index}/Stream.vtt?api_key=${session.token}`;
-    track.dataset.streamIndex = String(s.Index);
-    video.appendChild(track);
-
-    const opt = document.createElement('option');
-    opt.value = String(s.Index);
-    opt.textContent = track.label;
-    select.appendChild(opt);
-  });
-
-  select.classList.remove('hidden');
-
-  select.onchange = () => {
-    const chosenIndex = select.value;
-    const trackElements = video.querySelectorAll('track');
-
-    trackElements.forEach(el => {
-      // Find the associated TextTrack object on the track element
-      const tt = el.track;
-      if (!tt) return;
-
-      if (chosenIndex !== 'off' && el.dataset.streamIndex === chosenIndex) {
-        tt.mode = 'showing';
-      } else {
-        tt.mode = 'disabled';
-      }
-    });
+    Array.from(video.textTracks).forEach(tt => { tt.mode = 'hidden'; });
+    if (select.value !== 'off') {
+      const tt = Array.from(video.textTracks).find((_, i) => String(subStreams[i].Index) === select.value);
+      if (tt) tt.mode = 'showing';
+    }
   };
 }
 
@@ -675,7 +605,7 @@ document.getElementById('btn-restart').addEventListener('click', () => {
   endingOverlay.classList.add('hidden');
   engine.destroy();
   video.currentTime = 0;
-  engine = new BandersnatchEngine(video, SegmentMap, CHOICE_LABELS, engine.cb);
+  engine = new BandersnatchEngine(video, SegmentMap, STORY_DATA, engine.cb);
   engine.start();
 });
 document.getElementById('btn-continue').addEventListener('click', () => {

@@ -9,20 +9,17 @@ or native app changes required.
 ## How it works
 
 - It's a static site (`index.html` / `style.css` / `app.js` /
-  `segment-engine.js`) plus two data files: `segment-map.js` (the
-  branching graph — segment IDs, timestamps, which choice leads
-  where) and `choice-labels.js` (human-readable button text per
-  choice, generated with placeholder labels — see **Customizing
-  labels** below).
+  `segment-engine.js`) plus two data files: `segment-map.js` (raw
+  timestamps for every segment in the file) and `story-data.js` (the
+  actual branching logic — preconditions, segment groups, per-segment
+  choice moments with real on-screen button text, and initial story
+  state).
 - On play, it calls Jellyfin's `PlaybackInfo` endpoint to get a
   direct-play or transcoded stream URL for the item, same as
   Jellyfin's own web client would.
-- `segment-engine.js` watches the video's `timeupdate` event. At real
-  choice points it shows the overlay with a countdown; if you don't
-  pick, it falls back to the branch Netflix's own player would have
-  auto-selected. At the ~67 "silent" branch points in the graph (no
-  UI, just narrative variety) it jump-cuts automatically, same as the
-  source material does.
+- `segment-engine.js` is a faithful port of the real branching
+  algorithm — see **"The branching engine..."** section below for how
+  it actually resolves choices and why.
 
 ## Running it
 
@@ -39,6 +36,59 @@ Jellyfin server's reverse proxy, or on a Raspberry Pi / NAS / small
 VPS — anywhere reachable by the devices you want to watch on.
 
 **Add to home screen** on a phone/tablet for an app-like icon.
+
+## Player controls
+
+- **Space** / **K** — play/pause
+- **&larr; / &rarr;** — skip back/forward 10s (correctly re-syncs the branching engine)
+- **&uarr; / &darr;** — volume up/down
+- **M** — mute
+- **F** — fullscreen (or the button, or double-click the video)
+- Drag the progress bar to scrub anywhere in the file
+- Controls auto-hide after a few seconds of inactivity while playing,
+  same as any normal video player — move the mouse (or tap, on
+  touch) to bring them back. They stay visible while paused or during
+  a choice.
+
+## The branching engine: what it actually does
+
+The engine was rewritten once already after the first version got
+progression wrong. That first version picked branches with a weighted
+random function over `SegmentMap`'s `next` map — which turned out to
+be **incorrect**: the `weight` values aren't consulted by real
+playback logic at all. Checked against a public-domain reference
+client built against this same data, the real algorithm is:
+
+- Choice timing comes from `bandersnatch.js`'s `momentsBySegment`
+  (each moment's own `startMs`/`endMs`), not `SegmentMap`'s
+  `interactionZones` — those are a coarser, less precise stand-in.
+- Picking an option resolves to a specific segment via a
+  **precondition-gated, ordered list** (`segmentGroups`) — the first
+  entry whose precondition passes wins. It is not random. This is the
+  mechanism behind "remembered" choices quietly changing later scenes
+  (e.g. accepting the job once means you won't be offered it the same
+  way again).
+- A small persistent-state object (seeded from `bandersnatch.js`'s
+  `stateHistory`) tracks these preconditions across the whole
+  playthrough, updated via each moment/choice's `impressionData`.
+- Some choices cut the instant you click; others
+  (`config.disableImmediateSceneTransition`) wait until the segment
+  naturally finishes playing the "buffer" footage after your pick.
+
+`segment-engine.js` ports this faithfully — see the comments at the
+top of that file for the full model. `story-data.js` (generated from
+`bandersnatch.js`) carries the data this depends on: preconditions,
+segment groups, per-segment moments, and initial state.
+
+**A note on loops**: some playthroughs genuinely loop forever unless
+you pick differently — e.g. repeatedly choosing "GO BACK" in Colin's
+flat traps you until you pick "FOLLOW COLIN" instead. That's the real
+film's design, not a bug.
+
+`test-engine.js` is a headless simulation (`node test-engine.js`) that
+drives the engine through several full playthroughs without a
+browser — useful for verifying the engine after editing `story-data.js`
+or `segment-engine.js` yourself.
 
 ## First run
 
@@ -66,35 +116,13 @@ to allow it. Two options:
   default in recent versions; older versions may need a reverse-proxy
   header adjustment).
 
-## Customizing choice labels
-
-`choice-labels.js` ships with generic labels ("Option 1", "Option 2")
-because the segment map doesn't include the literal on-screen wording
-— that lives in Netflix's client-side copy, not in this data. Open
-the file and fill in real button text as you spot each choice while
-testing playback (the on-screen readout in the top-right of the
-player shows the current segment ID to make this easy):
-
-```js
-"2G": {
-  "title": "Which Record?",
-  "options": [
-    { "target": "1R", "label": "Thompson Twins" },
-    { "target": "1S", "label": "Now 2" }
-  ]
-}
-```
-
 ## Known limitations
 
-- The branching logic uses `segment-map.js`'s graph (timestamps +
-  weighted random branches + `defaultNext`). It does **not**
-  reproduce Netflix's much deeper narrative-state engine from
-  `bandersnatch.js` (preconditions, "remembered" choices affecting
-  later scenes, respawn logic) — that's a large additional project on
-  top of this if you want full parity.
 - Session reporting to Jellyfin ("now playing") is best-effort and
   silently ignored if it fails — it won't block playback.
+- Netflix's CDN image references were deliberately stripped out of
+  `story-data.js` at generation time — this player only ever shows
+  text and video freeze-frames, never hotlinked Netflix assets.
 
 ## Fixing "video freezes but audio keeps playing" on branch cuts
 
@@ -138,4 +166,7 @@ quality/speed balance; adjust as you like.
   timestamp.
 - **Subtitles**: any subtitle tracks Jellyfin reports for the file now
   show up in a dropdown in the player controls.
+- **Branching logic**: completely rewritten from a weighted-random
+  guess to a faithful port of the real precondition/state-based
+  algorithm — see "The branching engine: what it actually does" above.
 
