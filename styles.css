@@ -1,0 +1,1152 @@
+/*
+ * This is free and unencumbered software released into the public domain.
+ * See <http://unlicense.org> for the original license text this file
+ * extends and continues to be distributed under.
+ */
+
+/* =======================================================================
+   TOKENS
+   TUCKERSOFT REMOTE TERMINAL, 1984. A harsh, high-contrast CRT computer:
+   pure black, stark white borders, square corners, hard offset shadows
+   in red and cyan instead of soft blur, uppercase monospace labels.
+   No rounded corners, no gradients-as-decoration, no soft drop shadows —
+   every edge is a deliberate hard line.
+========================================================================== */
+:root {
+	--bg: #000;
+	--bg-raised: #000;
+	--ink: #f4f4f2;
+	--ink-dim: #8a8a8a;
+	--line: #3a3a3a;
+
+	--red: #ff2f4f;
+	--cyan: #35e6c8;
+
+	--font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
+	--font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html, body {
+	width: 100%;
+	height: 100%;
+}
+
+body {
+	margin: 0;
+	text-align: center;
+	overflow: hidden;
+	background: var(--bg);
+	color: var(--ink);
+	font-family: var(--font-display);
+}
+
+video {
+	width: 100%;
+	max-height: 100%;
+}
+
+/* =======================================================================
+   CRT scanline overlay — sits above everything, never intercepts clicks.
+   Amplified: a touch darker and a slow flicker whenever the terminal
+   screen is up.
+========================================================================== */
+#scanlines {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	pointer-events: none;
+	background: repeating-linear-gradient(
+		0deg,
+		rgba(0, 0, 0, 0.22) 0px,
+		rgba(0, 0, 0, 0.22) 1px,
+		transparent 1px,
+		transparent 3px
+	);
+	mix-blend-mode: overlay;
+	opacity: 0.6;
+	animation: crt-flicker 5s ease-in-out infinite;
+}
+
+@keyframes crt-flicker {
+	0%, 100% { opacity: 0.6; }
+	48% { opacity: 0.6; }
+	50% { opacity: 0.42; }
+	52% { opacity: 0.6; }
+	80% { opacity: 0.6; }
+	81% { opacity: 0.5; }
+}
+
+/* =======================================================================
+   In-video choice prompt — caption, boxed options, countdown line.
+   Same hard-edged language as the terminal: square corners, thick
+   borders, an offset shadow that "presses in" on hover instead of a
+   soft glow.
+========================================================================== */
+#interactionZones,
+#nextSegments,
+#nextSegment {
+	display: none;
+}
+
+.buttons ul li {
+	list-style-type: none;
+}
+
+.choice-stage {
+	position: absolute;
+	left: 50%;
+	bottom: 9%;
+	transform: translateX(-50%);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 16px;
+	width: min(92vw, 760px);
+	z-index: 20;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.15s ease;
+}
+
+.choice-stage.is-active {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+#choiceCaption {
+	font-family: var(--font-mono);
+	font-weight: 700;
+	font-size: 1.4rem;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--ink);
+	text-shadow: 2px 0 var(--red), -2px 0 var(--cyan);
+}
+
+#choiceCaption:empty {
+	display: none;
+}
+
+#choices {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 18px;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	width: 100%;
+}
+
+#choices li {
+	background: #000;
+	border: 2px solid var(--ink);
+	border-radius: 0;
+	flex: 1 1 220px;
+	max-width: 340px;
+	min-width: 200px;
+	overflow: hidden;
+	box-shadow: 5px 5px 0px var(--red);
+	animation: choiceRise 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+	opacity: 0;
+	transform: translateY(10px);
+	transition: box-shadow 0.12s ease, transform 0.12s ease, border-color 0.12s ease;
+}
+
+#choices li:nth-child(1) { animation-delay: 0.02s; }
+#choices li:nth-child(2) { animation-delay: 0.08s; }
+#choices li:nth-child(3) { animation-delay: 0.14s; }
+#choices li:nth-child(4) { animation-delay: 0.2s; }
+
+@keyframes choiceRise {
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+#choices li:hover {
+	transform: translate(3px, 3px);		
+}
+
+#choices a {
+	display: block;
+	padding: 17px 22px;
+	font-weight: 700;
+	font-size: 1.5rem;
+	letter-spacing: 0.09em;
+	text-transform: uppercase;
+	color: var(--ink);
+	text-align: center;
+	font-family: var(--font-mono);
+	text-shadow: 2px 0 var(--red), -2px 0 var(--cyan);
+	text-decoration:none;
+}
+
+#choices a:hover,
+#choices a:focus {
+	display: block;
+	padding: 17px 22px;
+	font-weight: 700;
+	font-size: 1.5rem;
+	letter-spacing: 0.09em;
+	text-transform: uppercase;
+	color: #ff2549;
+	text-align: center;
+	font-family: var(--font-mono);
+	text-shadow: 2px 0 #ff2549, -2px 0 #ff2549;
+	text-decoration:none;
+}
+
+/* the branch the story already expects you to take */
+.is-default-choice {
+	border-color: var(--cyan);
+	box-shadow: 5px 5px 0px var(--cyan);
+}
+
+.is-default-choice:hover {
+	box-shadow: 2px 2px 0px var(--cyan);
+}
+
+.is-default-choice a {
+	color: var(--cyan);
+}
+
+.timer-track {
+	width: 260px;
+	max-width: 70%;
+	height: 4px;
+	background: var(--line);
+	border-radius: 0;
+	overflow: hidden;
+}
+
+#progress {
+	height: 100%;
+	width: 0%;
+	background: var(--red);
+	box-shadow: 0 0 10px rgba(255, 47, 79, 0.7);
+	transition: width 0.05s linear;
+}
+
+video::cue {
+	font: 100% sans-serif;
+	color: white;
+	background: none;
+	text-shadow: 0px 0px 10px #000;
+}
+
+/* =======================================================================
+   Layout shell
+========================================================================== */
+.controls {
+	margin: auto;
+	width: 100%;
+	height: 100%;
+}
+
+#c {
+	margin: auto;
+	height: 100%;
+	width: 100%;
+}
+
+#c:-webkit-full-screen, #c:-moz-full-screen, #c:-ms-fullscreen, #c:fullscreen {
+	width: 100vw;
+	height: 100vh;
+}
+
+section[role="banner"] {
+	position: relative;
+	width: 100%;
+	height: 100%;
+}
+
+#wrapper-video {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background: #000;
+}
+
+#wrapper-video video {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	margin: auto;
+	min-width: 50%;
+	min-height: 50%;
+}
+
+video::-webkit-media-controls-panel {
+	width: 40px;
+}
+
+/* =======================================================================
+   Custom control bar — square, hard-edged, a thick red top border
+   instead of a soft gradient fade.
+========================================================================== */
+.player-bar {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 30;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 16px;
+	background: #000;
+	border-top: 3px solid var(--ink);
+	opacity: 0;
+	transform: translateY(6px);
+	pointer-events: none;
+	transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.player-bar.is-visible {
+	opacity: 1;
+	transform: translateY(0);
+	pointer-events: auto;
+}
+
+.pbar-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	background: none;
+	border: none;
+	border-radius: 0;
+	color: var(--ink);
+	cursor: pointer;
+	transition: color 0.12s ease, background 0.12s ease;
+	flex: 0 0 auto;
+}
+
+.pbar-btn:hover {
+	color: #000;
+	background: var(--red);
+}
+
+.pbar-btn.is-active {
+	color: var(--cyan);
+}
+
+.pbar-btn .icon {
+	width: 20px;
+	height: 20px;
+	fill: currentColor;
+}
+
+.pbar-skiplabel {
+	position: absolute;
+	bottom: 2px;
+	right: 2px;
+	font-family: var(--font-mono);
+	font-size: 8px;
+	font-weight: 700;
+	line-height: 1;
+	pointer-events: none;
+}
+
+.pbar-cc {
+	width: auto;
+	min-width: 32px;
+	padding: 0 6px;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	border: 1px solid var(--line);
+}
+
+.pbar-time {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: var(--ink-dim);
+	white-space: nowrap;
+	flex: 0 0 auto;
+}
+
+.pbar-seek {
+	flex: 1 1 auto;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+}
+
+.pbar-seek-track {
+	position: relative;
+	width: 100%;
+	height: 4px;
+	background: var(--line);
+	border-radius: 0;
+}
+
+.pbar-seek-fill {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 0%;
+	background: var(--red);
+	border-radius: 0;
+}
+
+.pbar-seek-handle {
+	position: absolute;
+	top: 50%;
+	left: 0%;
+	width: 12px;
+	height: 12px;
+	border-radius: 0;
+	background: var(--ink);
+	border: 2px solid var(--red);
+	transform: translate(-50%, -50%) rotate(45deg);
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+
+.pbar-seek:hover .pbar-seek-handle {
+	opacity: 1;
+}
+
+.pbar-group {
+	display: flex;
+	align-items: center;
+	flex: 0 0 auto;
+	position: relative;
+}
+
+.pbar-volume {
+	gap: 4px;
+}
+
+.pbar-range {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 70px;
+	height: 3px;
+	border-radius: 0;
+	background: var(--line);
+	outline: none;
+}
+
+.pbar-range::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	width: 10px;
+	height: 10px;
+	border-radius: 0;
+	background: var(--red);
+	cursor: pointer;
+}
+
+.pbar-range::-moz-range-thumb {
+	width: 10px;
+	height: 10px;
+	border: none;
+	border-radius: 0;
+	background: var(--red);
+	cursor: pointer;
+}
+
+.pbar-menu {
+	position: absolute;
+	bottom: 42px;
+	right: 0;
+	min-width: 150px;
+	background: #000;
+	border: 2px solid var(--ink);
+	border-radius: 0;
+	box-shadow: 4px 4px 0px var(--red);
+	padding: 6px;
+	flex-direction: column;
+	gap: 2px;
+}
+
+/* display:flex must only apply while NOT hidden, otherwise it beats the
+   browser's own [hidden]{display:none} rule and the menu can never close. */
+.pbar-menu:not([hidden]) {
+	display: flex;
+}
+
+.pbar-menu-item {
+	background: none;
+	border: none;
+	color: var(--ink);
+	font-family: var(--font-mono);
+	font-size: 12px;
+	text-transform: uppercase;
+	text-align: left;
+	padding: 7px 10px;
+	border-radius: 0;
+	cursor: pointer;
+}
+
+.pbar-menu-item:hover {
+	background: var(--red);
+	color: #000;
+}
+
+.pbar-menu-item.is-active {
+	color: var(--cyan);
+}
+
+.pbar-menu-empty {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--ink-dim);
+	padding: 7px 10px;
+	text-transform: uppercase;
+}
+
+/* =======================================================================
+   Source picker — the Tuckersoft terminal boot screen
+========================================================================== */
+#file-selector {
+	display: none;
+	width: 100%;
+	height: 100%;
+	position: fixed;
+	top: 0;
+	left: 0;
+	align-items: center;
+	justify-content: center;
+	background: radial-gradient(circle at center, #111 0%, #000 80%);
+}
+
+/* Full-bleed blurred background art — a static shipped asset (bg.png),
+   not something the viewer sets. If the file isn't there yet, the plain
+   CRT gradient above shows through untouched. */
+.term-backdrop {
+	position: fixed;
+	inset: -60px;
+	background-image: url('bg.png');
+	background-size: cover;
+	background-position: center;
+	filter: blur(30px) brightness(0.3) saturate(1.1);
+	transform: scale(1.08);
+	z-index: 0;
+}
+
+.term-shell {
+	position: relative;
+	z-index: 1;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	overflow-y: auto;
+}
+
+.term-window {
+	width: 100%;
+	max-width: 620px;
+	background: var(--bg-raised);
+	border: 3px solid var(--ink);
+	border-radius: 0;
+	box-shadow: 12px 12px 0px rgba(255, 47, 79, 0.45), -8px -8px 0px rgba(53, 230, 200, 0.25);
+	text-align: center;
+	margin: auto;
+}
+
+.term-titlebar {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 12px 16px;
+	border-bottom: 3px solid var(--ink);
+	background: #000;
+}
+
+.term-dot {
+	width: 12px;
+	height: 12px;
+	border-radius: 0;
+	background: var(--ink);
+	display: inline-block;
+}
+
+.term-titletext {
+	margin-left: 8px;
+	font-family: var(--font-mono);
+	font-size: 25px;
+	font-weight: 700;
+	color: var(--ink);
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+}
+
+.blink {
+	animation: blink 1.1s steps(1) infinite;
+	color: var(--cyan);
+}
+
+@keyframes blink {
+	50% { opacity: 0; }
+}
+
+.term-body {
+	padding: 26px 28px 22px;
+}
+
+/* =======================================================================
+   Static title art (title.png) — a fixed piece of art, not a viewer
+   upload. Fails quietly if the asset isn't present yet.
+========================================================================== */
+.term-titlecard {
+	margin: 0 0 18px;
+	background: #000;
+	max-height: 140px;
+	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.term-titlecard-img {
+	display: block;
+	width: 50%;
+	height: auto;
+	max-height: 140px;
+	object-fit: cover;
+}
+
+.term-titlecard.is-missing {
+	display: none;
+}
+
+/* =======================================================================
+   Glitchy chromatic-aberration heading
+========================================================================== */
+.term-h1 {
+	position: relative;
+	font-family: var(--font-display);
+	font-weight: 700;
+	font-size: 2.1rem;
+	letter-spacing: 0.03em;
+	margin: 0 0 8px;
+	color: var(--ink);
+	text-transform: uppercase;
+}
+
+.term-h1 .accent {
+	color: var(--red);
+}
+
+.term-h1.glitching {
+	animation: glitch-shift 2.6s steps(1) infinite;
+}
+
+.term-h1.glitching::before,
+.term-h1.glitching::after {
+	content: attr(data-text);
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 100%;
+	overflow: hidden;
+	background: transparent;
+}
+
+.term-h1.glitching::before {
+	color: var(--red);
+	clip-path: inset(0 0 88% 0);
+	animation: glitch-slice-a 3.2s steps(1) infinite;
+}
+
+.term-h1.glitching::after {
+	color: var(--cyan);
+	clip-path: inset(78% 0 0 0);
+	animation: glitch-slice-b 3.7s steps(1) infinite;
+}
+
+@keyframes glitch-shift {
+	0%, 92%, 100% { transform: translate(0, 0); }
+	93% { transform: translate(-1px, 0.5px); }
+	95% { transform: translate(1px, -0.5px); }
+}
+
+@keyframes glitch-slice-a {
+	0%, 90%, 100% { transform: translate(0, 0); opacity: 0; }
+	91% { transform: translate(2px, 0); opacity: 0.8; }
+	94% { transform: translate(-2px, 0); opacity: 0; }
+}
+
+@keyframes glitch-slice-b {
+	0%, 90%, 100% { transform: translate(0, 0); opacity: 0; }
+	92% { transform: translate(-2px, 0); opacity: 0.8; }
+	96% { transform: translate(2px, 0); opacity: 0; }
+}
+
+.term-sub {
+	font-family: var(--font-mono);
+	font-size: 13px;
+	line-height: 1.6;
+	color: var(--ink-dim);
+	margin: 0 0 22px;
+
+}
+
+/* =======================================================================
+   Boot log — atmospheric typing effect
+========================================================================== */
+.boot-log {
+	margin: 0 0 18px;
+	min-height: 20px;
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	line-height: 1.7;
+	color: var(--cyan);
+	white-space: pre-wrap;
+	text-transform: uppercase;
+}
+
+.boot-log:empty {
+	display: none;
+}
+
+.boot-log .cursor {
+	display: inline-block;
+	width: 8px;
+	height: 14px;
+	background: var(--cyan);
+	animation: blink 1s steps(1) infinite;
+	vertical-align: -2px;
+}
+
+/* =======================================================================
+   Tabs & panes
+========================================================================== */
+.term-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 3px solid var(--line);
+    margin-bottom: 20px;
+    justify-content: center;
+}
+
+.term-tab {
+	font-family: var(--font-mono);
+	font-size: 13px;
+	font-weight: 700;
+	text-transform: uppercase;
+	background: none;
+	border: none;
+	color: var(--ink-dim);
+	padding: 8px 4px 12px;
+	margin-right: 22px;
+	cursor: pointer;
+	position: relative;
+	transition: color 0.15s ease;
+}
+
+.term-tab:hover,
+.term-tab.is-active {
+	color: var(--ink);
+}
+
+.term-tab.is-active::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: -3px;
+	height: 3px;
+	background: var(--red);
+}
+
+.term-pane {
+	display: none;
+}
+
+.term-pane.is-active {
+	display: block;
+	animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+/* =======================================================================
+   File inputs
+========================================================================== */
+.file-area {
+	position: relative;
+}
+
+.file-area-sub {
+	margin-top: 12px;
+}
+
+.file-area-sub .file-dummy {
+	padding: 16px 20px;
+}
+
+.file-area-sub .file-dummy .default,
+.file-area-sub .file-dummy .success {
+	font-size: 12px;
+}
+
+.file-area input[type=file] {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	top: 0;
+	left: 0;
+	opacity: 0;
+	cursor: pointer;
+	z-index: 2;
+}
+
+.file-area .file-dummy {
+	border: 2px dashed var(--ink-dim);
+	border-radius: 0;
+	background: #000;
+	text-align: center;
+	transition: border-color 0.15s ease, background 0.15s ease;
+	padding: 34px 20px;
+}
+
+.file-area:hover .file-dummy {
+	border: 2px solid var(--cyan);
+	background: rgba(53, 230, 200, 0.08);
+}
+
+.file-dummy .default {
+	font-family: var(--font-mono);
+	font-weight: 700;
+	font-size: 14px;
+	color: var(--ink);
+	text-transform: uppercase;
+}
+
+.file-dummy .success {
+	display: none;
+	color: var(--cyan);
+	font-family: var(--font-mono);
+	font-weight: 700;
+	text-transform: uppercase;
+}
+
+.file-area input[type=file]:valid + .file-dummy .success {
+	display: inline;
+}
+
+.file-area input[type=file]:valid + .file-dummy .default {
+	display: none;
+}
+
+.drop-hint {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: var(--ink-dim);
+	margin: 10px 0 0;
+	text-transform: uppercase;
+}
+
+/* =======================================================================
+   Jellyfin form
+========================================================================== */
+#jellyfin-form {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.term-field {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.04em;
+	color: var(--ink-dim);
+	text-transform: uppercase;
+}
+
+.term-field input {
+	font-family: var(--font-mono);
+	font-size: 14px;
+	color: var(--ink);
+	background: #000;
+	border: 2px solid var(--line);
+	border-radius: 0;
+	padding: 10px 12px;
+	outline: none;
+	transition: border-color 0.15s ease;
+}
+
+.term-field input:focus {
+	border-color: var(--cyan);
+}
+
+.term-check {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: var(--ink-dim);
+	cursor: pointer;
+	text-transform: uppercase;
+}
+
+.term-check input {
+	accent-color: var(--red);
+	border-radius: 0;
+}
+
+.term-go {
+	font-family: var(--font-mono);
+	font-weight: 700;
+	font-size: 14px;
+	text-transform: uppercase;
+	color: #fff;
+	background: var(--red);
+	border: 2px solid var(--ink);
+	border-radius: 0;
+	padding: 11px 20px;
+	cursor: pointer;
+	transition: transform 0.1s ease, box-shadow 0.1s ease;
+	box-shadow: 4px 4px 0px var(--cyan);
+}
+
+.term-go:hover {
+	transform: translate(2px, 2px);
+	box-shadow: 2px 2px 0px var(--cyan);
+}
+
+.term-go:active {
+	transform: translate(4px, 4px);
+	box-shadow: 0px 0px 0px var(--cyan);
+}
+
+.term-error {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	color: var(--red);
+	margin: 0;
+	min-height: 1em;
+	text-transform: uppercase;
+}
+
+/* =======================================================================
+   Tips, footer, credits
+========================================================================== */
+.term-tips {
+	list-style: none;
+	margin: 24px 0 0;
+	padding: 14px 0 0;
+	border-top: 1px solid var(--line);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--ink-dim);
+	line-height: 2.1;
+}
+
+kbd {
+	background: #000;
+	border: 1px solid var(--line);
+	border-radius: 0;
+	color: var(--ink);
+	display: inline-block;
+	font-family: var(--font-mono);
+	font-size: 10px;
+	line-height: 10px;
+	padding: 3px 5px;
+	vertical-align: middle;
+}
+
+.term-footer {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-dim);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    text-transform: uppercase;
+    justify-content: center;
+}
+
+.term-footer-sep {
+	color: var(--line);
+}
+
+.term-footer select {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	background: #000;
+	color: var(--ink);
+	border: 1px solid var(--line);
+	border-radius: 0;
+	padding: 4px 8px;
+	text-transform: uppercase;
+}
+
+.term-reset {
+	color: var(--red);
+	text-decoration: none;
+}
+
+.term-reset:hover {
+	text-decoration: underline;
+}
+
+.term-credits {
+	margin: 14px 0 0;
+	font-family: var(--font-mono);
+	font-size: 10px;
+	color: var(--ink-dim);
+	line-height: 1.8;
+	text-transform: none;
+}
+
+.term-credits a {
+	color: var(--ink-dim);
+	text-decoration: underline;
+}
+
+.term-credits a:hover {
+	color: var(--ink);
+}
+
+/* =======================================================================
+   Choice-code entry (the 5-digit phone code puzzle)
+========================================================================== */
+.containerCode {
+	display: flex;
+	flex-direction: column;
+	justify-content: space-evenly;
+	align-items: center;
+	height: 100%;
+}
+
+.input-container,
+.buttonsCode {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	position: relative;
+}
+
+.input-container span,
+.buttonsCode span {
+	background: #000;
+	color: var(--ink);
+	width: 3.4rem;
+	height: 4.6rem;
+	text-align: center;
+	margin: 5px;
+	border: 2px solid var(--ink);
+	border-radius: 0;
+	font-family: var(--font-mono);
+	font-weight: 700;
+	font-size: 2.2rem;
+	line-height: 4.6rem;
+}
+
+.buttonsCode span {
+	cursor: pointer;
+	transition: border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.inputField::placeholder {
+	color: var(--ink-dim);
+}
+
+.buttonsCode span:hover {
+	border-color: var(--red);
+	color: var(--red);
+	box-shadow: 3px 3px 0px var(--cyan);
+}
+
+/* =======================================================================
+   Responsive
+========================================================================== */
+@media (max-width: 760px) {
+	.term-window {
+		max-width: 92vw;
+	}
+}
+
+@media (max-width: 520px) {
+	.term-shell {
+		padding: 14px;
+	}
+	.term-body {
+		padding: 20px 16px 16px;
+	}
+	.term-window {
+		box-shadow: 7px 7px 0px rgba(255, 47, 79, 0.45), -5px -5px 0px rgba(53, 230, 200, 0.25);
+	}
+	.term-h1 {
+		font-size: 1.5rem;
+	}
+	.term-titlecard {
+		max-height: 100px;
+	}
+	.term-titlecard-img {
+		max-height: 100px;
+	}
+	#choiceCaption {
+		font-size: 1.05rem;
+	}
+	#choices a {
+		font-size: 0.72rem;
+		padding: 13px 14px;
+	}
+	.player-bar {
+		gap: 6px;
+		padding: 8px 10px;
+	}
+	.pbar-time {
+		display: none;
+	}
+	.pbar-range {
+		width: 46px;
+	}
+}
+
+@media (max-width: 340px) {
+	.pbar-group.pbar-volume {
+		display: none;
+	}
+}
+
+@media (max-height: 480px) and (orientation: landscape) {
+	.term-shell {
+		align-items: flex-start;
+		padding: 10px;
+	}
+	.term-titlecard {
+		display: none;
+	}
+	.boot-log {
+		margin-bottom: 8px;
+	}
+	.term-body {
+		padding: 14px 18px;
+	}
+}

@@ -1,145 +1,249 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>BANDERSNATCH // TUCKERSOFT TERMINAL</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bandersnatch Interactive Player</title>
+<meta name="description" content="Stand-alone open-source interactive HTML player for Black Mirror - Bandersnatch">
+<meta name="keywords" content="Bandersnatch,Bandersnatch Interactive Player,Interactive Player,watch,">
+
+<script src="bandersnatch.js"></script>
+<script src="ru.js"></script>
+<script src="en.js"></script>
+<script src="fr.js"></script>
+<script src="SegmentMap.js"></script>
+<script src="scripts.js"></script>
+<script>
+	// keep localizable strings out of scripts.js
+	function askReset() {
+		if (confirm('Are you sure you want to reset all choices, breadcrumbs, and watched scenes?'))
+			reset();
+	}
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" type="text/css" href="styles.css">
 </head>
+
 <body>
+<div id="scanlines"></div>
+<div>
+	<div id="c">
+		<section role="banner">
+			<div id="file-selector">
+				<div class="term-backdrop"></div>
+				<div class="term-shell">
+					<div class="term-window">
 
-<canvas id="scanlines"></canvas>
+						<div class="term-titlebar">
+							<span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
+							<span class="term-titletext">bandersnatch<span class="blink">_</span></span>
+						</div>
 
-<!-- ===================== SCREEN 1: CONNECT ===================== -->
-<section id="screen-connect" class="screen active">
-  <div class="terminal-card">
-    <div class="terminal-head">
-      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="terminal-title">TUCKERSOFT REMOTE TERMINAL</span>
-    </div>
-    <div class="terminal-body">
-      <pre id="boot-log" class="boot-log"></pre>
+						<div class="term-body">
+							<pre class="boot-log" id="boot-log"></pre>
 
-      <form id="form-connect" class="term-form hidden">
-        <label class="term-label">SERVER ADDRESS</label>
-        <input id="input-server" class="term-input" type="text" placeholder="http://192.168.1.50:8096" autocomplete="url" required>
-        <div class="term-error" id="error-connect"></div>
-        <button type="submit" class="btn-primary">
-          <span class="btn-label">CONNECT</span>
-        </button>
-      </form>
-    </div>
-  </div>
-</section>
+							
 
-<!-- ===================== SCREEN 2: LOGIN ===================== -->
-<section id="screen-login" class="screen">
-  <div class="terminal-card">
-    <div class="terminal-head">
-      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="terminal-title" id="login-server-label">SERVER</span>
-    </div>
-    <div class="terminal-body">
-      <form id="form-login" class="term-form">
-        <label class="term-label">USERNAME</label>
-        <input id="input-username" class="term-input" type="text" autocomplete="username" required>
-        <label class="term-label">PASSWORD</label>
-        <input id="input-password" class="term-input" type="password" autocomplete="current-password">
-        <div class="term-error" id="error-login"></div>
-        <button type="submit" class="btn-primary">
-          <span class="btn-label">AUTHENTICATE</span>
-        </button>
-        <button type="button" class="btn-ghost" id="btn-back-to-connect">&larr; different server</button>
-      </form>
-    </div>
-  </div>
-</section>
+							<h1 class="term-h1 glitching" id="term-h1" data-text="SELECT.SOURCE">SELECT<span class="accent">.</span>SOURCE</h1>
+							<p class="term-sub">Every path was always going to lead here. Pick a feed &mdash; local file, or a Jellyfin server.</p>
 
-<!-- ===================== SCREEN 3: LOCATING TITLE ===================== -->
-<section id="screen-locating" class="screen">
-  <div class="terminal-card">
-    <div class="terminal-body">
-      <pre id="locating-log" class="boot-log"></pre>
-      <div id="search-fallback" class="term-form hidden">
-        <label class="term-label">SEARCH YOUR LIBRARY</label>
-        <input id="input-search" class="term-input" type="text" placeholder="Type a title..." value="Bandersnatch">
-        <button type="button" id="btn-search" class="btn-primary"><span class="btn-label">SEARCH</span></button>
-        <div id="search-results" class="search-results"></div>
-      </div>
-    </div>
-  </div>
-</section>
+							<div class="term-tabs" role="tablist">
+								<button type="button" class="term-tab is-active" data-tab="local" role="tab" aria-selected="true">[1] Local file</button>
+								<button type="button" class="term-tab" data-tab="jellyfin" role="tab" aria-selected="false">[2] Jellyfin</button>
+							</div>
 
-<!-- ===================== SCREEN 4: TITLE POPUP ===================== -->
-<section id="screen-title" class="screen">
-  <div class="backdrop-blur" id="title-backdrop"></div>
-  <div class="title-card">
-    <div class="poster-frame">
-      <img id="title-poster" alt="">
-      <div class="poster-glitch"></div>
-    </div>
-    <div class="title-meta">
-      <h1 id="title-name">BANDERSNATCH</h1>
-      <p class="title-sub">AN INTERACTIVE FILM &mdash; YOUR CHOICES SHAPE THE STORY</p>
-      <button id="btn-play" class="btn-primary btn-large">
-        <span class="btn-label">BEGIN THE EXPERIENCE</span>
-      </button>
-      <button id="btn-logout" class="btn-ghost">log out</button>
-    </div>
-  </div>
-</section>
+							<div class="term-pane is-active" data-pane="local">
+								<div class="file-area">
+									<input id="fileinput" type="file" accept="video/*">
+									<div class="file-dummy">
+										<span class="default">Select the Bandersnatch video file ( 5:12:14 )</span>
+										<span class="success">Loaded &mdash; branching now.</span>
+										<p class="drop-hint">Drag it onto this pane, or click to browse.</p>
+									</div>
+								</div>
+								<div class="file-area file-area-sub">
+									<input id="subtitleinput" type="file" accept=".vtt,.srt,text/vtt">
+									<div class="file-dummy">
+										<span class="default" id="sub-label-default">Optional &mdash; add subtitles (.vtt or .srt)</span>
+										<span class="success" id="sub-label-success" style="display:none;">Subtitles loaded &mdash; CC is ready.</span>
+									</div>
+								</div>
+							</div>
 
-<!-- ===================== SCREEN 5: PLAYER ===================== -->
-<section id="screen-player" class="screen">
-  <video id="video" playsinline></video>
+							<div class="term-pane" data-pane="jellyfin">
+								<form id="jellyfin-form" autocomplete="off">
+									<label class="term-field">
+										<span>Server URL</span>
+										<input type="text" id="jf-server" placeholder="https://jellyfin.example.com" spellcheck="false">
+									</label>
+									<label class="term-field">
+										<span>API key</span>
+										<input type="password" id="jf-apikey" placeholder="Jellyfin API key" spellcheck="false">
+									</label>
+									<label class="term-check">
+										<input type="checkbox" id="jf-remember">
+										<span>Remember on this device &amp; auto-play next time</span>
+									</label>
+									<button type="submit" class="term-go">Play from Jellyfin &rarr;</button>
+									<p class="term-error" id="jf-error"></p>
+									<pre class="boot-log" id="jf-boot-log"></pre>
+								</form>
+							</div>
 
-  <div class="player-chrome" id="player-chrome">
-    <div class="chrome-top">
-      <button id="btn-exit" class="chrome-btn" title="Exit">&times;</button>
-      <span id="segment-readout" class="segment-readout"></span>
-      <button id="btn-fullscreen" class="chrome-btn" title="Fullscreen">&#9974;</button>
-    </div>
-    <div class="chrome-bottom">
-      <button id="btn-playpause" class="chrome-btn" title="Play/Pause (Space)">&#10073;&#10073;</button>
-      <button id="btn-skip-back" class="chrome-btn" title="Back 10s (&larr;)">&#8634;10</button>
-      <button id="btn-skip-fwd" class="chrome-btn" title="Forward 10s (&rarr;)">10&#8635;</button>
-      <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
-      <span id="time-readout" class="time-readout">00:00 / 00:00</span>
-      <button id="btn-mute" class="chrome-btn" title="Mute (M)">&#128266;</button>
-      <input id="volume-slider" class="volume-slider" type="range" min="0" max="1" step="0.05" value="1" title="Volume (&uarr;/&darr;)">
-      <select id="subtitle-select" class="subtitle-select hidden"><option value="off">Subtitles: Off</option></select>
-    </div>
-  </div>
+							<ul class="term-tips">
+								<li><kbd>F</kbd> fullscreen &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>Space</kbd> play/pause</li>
+								<li><kbd>&larr;</kbd> / <kbd>&rarr;</kbd> previous / next segment &nbsp; <kbd>&uarr;</kbd> / <kbd>&darr;</kbd> speed</li>
+								<li>Play/pause, &plusmn;10s, volume, subtitles &amp; fullscreen live in the bar at the bottom of the video.</li>
+							</ul>
 
-  <!-- Choice overlay -->
-  <div id="choice-overlay" class="choice-overlay hidden">
-    <div class="choice-title" id="choice-title"></div>
-    <div class="choice-grid" id="choice-grid"></div>
-    <div class="choice-timer-track"><div id="choice-timer-fill" class="choice-timer-fill"></div></div>
-  </div>
+							<div class="term-footer">
+								<span>Translate choices:</span>
+								<select id="choice-translation">
+									<option value="ru">Russian</option>
+									<option value="en" selected="">English</option>
+									<option value="fr">French</option>
+								</select>
+								<span class="term-footer-sep">&middot;</span>
+								<a href="javascript:askReset()" class="term-reset">Reset all progress</a>
+							</div>
+							<p class="term-credits">
+								Original &mdash; <a href="https://github.com/joric/bandersnatch/">joric</a> &nbsp;|&nbsp;
+								Web player, subtitles &mdash; <a href="https://github.com/mohetios">mohetios</a> &nbsp;|&nbsp;
+								Fixes &amp; improvements &mdash; <a href="https://github.com/CyberShadow">CyberShadow</a>
+							</p>
+						</div>
+					</div>
+				</div>
+			</div>
 
-  <!-- Ending overlay -->
-  <div id="ending-overlay" class="ending-overlay hidden">
-    <div class="ending-card">
-      <h2 id="ending-heading">BRANCH COMPLETE</h2>
-      <p id="ending-sub">This path has run its course.</p>
-      <div class="ending-actions">
-        <button id="btn-restart" class="btn-primary"><span class="btn-label">RESTART FROM THE BEGINNING</span></button>
-        <button id="btn-continue" class="btn-ghost hidden">let it keep playing &rarr;</button>
-      </div>
-    </div>
-  </div>
+			<div id="wrapper-video" style="display: none;">
+				<video id="video" preload="metadata">
+					<source id="video-source" src="">
+				</video>
 
-  <!-- Cut-transition flash -->
-  <div id="cut-flash" class="cut-flash"></div>
-</section>
+				<div class="controls">
+					<div class="choice-stage" id="choiceStage">
+						<div id="choiceCaption"></div>
+						<ul id="choices"></ul>
+						<div class="timer-track"><div id="progress"></div></div>
+					</div>
+					<div class="buttons">
+						<ul id="interactionZones"></ul>
+						<ul id="nextSegments"></ul>
+						<ul id="nextSegment"></ul>
+					</div>
+				</div>
 
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
-<script src="segment-map.js"></script>
-<script src="story-data.js"></script>
-<script src="segment-engine.js"></script>
-<script src="app.js"></script>
+				<div class="player-bar" id="playerBar">
+					<button type="button" class="pbar-btn" id="btn-playpause" aria-label="Play or pause">
+						<svg class="icon icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+						<svg class="icon icon-pause" viewBox="0 0 24 24" hidden><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+					</button>
+					<button type="button" class="pbar-btn" id="btn-back10" aria-label="Back 10 seconds">
+						<svg class="icon" viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+						<span class="pbar-skiplabel">10</span>
+					</button>
+					<button type="button" class="pbar-btn" id="btn-fwd10" aria-label="Forward 10 seconds">
+						<svg class="icon" viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>
+						<span class="pbar-skiplabel">10</span>
+					</button>
+
+					<span class="pbar-time" id="pbarTime">0:00 / 0:00</span>
+
+					<div class="pbar-seek" id="pbarSeek">
+						<div class="pbar-seek-track">
+							<div class="pbar-seek-fill" id="pbarSeekFill"></div>
+							<div class="pbar-seek-handle" id="pbarSeekHandle"></div>
+						</div>
+					</div>
+
+					<div class="pbar-group pbar-volume">
+						<button type="button" class="pbar-btn" id="btn-mute" aria-label="Mute or unmute">
+							<svg class="icon icon-vol-high" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1-3.29-2.5-4.03v8.05c1.5-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+							<svg class="icon icon-vol-muted" viewBox="0 0 24 24" hidden><path d="M16.5 12A4.5 4.5 0 0014 7.97v2.21l2.45 2.45c.03-.2.05-.42.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 003.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+						</button>
+						<input type="range" id="volumeSlider" class="pbar-range" min="0" max="1" step="0.01" value="1" aria-label="Volume">
+					</div>
+
+					<div class="pbar-group pbar-subs">
+						<button type="button" class="pbar-btn pbar-cc" id="btn-subs" aria-label="Subtitles">CC</button>
+						<div class="pbar-menu" id="subsMenu" hidden></div>
+					</div>
+
+					<button type="button" class="pbar-btn" id="btn-fullscreen" aria-label="Toggle fullscreen">
+						<svg class="icon" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+					</button>
+				</div>
+			</div>
+
+		</section>
+	</div>
+</div>
+
+<script>
+	var select = document.getElementById('choice-translation');
+	select.addEventListener('change', (e) => {
+		translated_choices = window[select.value];
+		console.log(select.value);
+		momentsBySegment = switch_choices();
+	});
+
+	// Terminal boot-log intro. Purely atmospheric — the real UI underneath
+	// is already usable while this plays.
+	(function () {
+		var log = document.getElementById('boot-log');
+		if (!log) return;
+		var lines = [
+			'TUCKERSOFT REMOTE TERMINAL',
+			'booting branch-navigation subsystem\u2026',
+			'link established.'
+		];
+		var i = 0, c = 0;
+		function typeLine() {
+			if (i >= lines.length) {
+				log.innerHTML += '<span class="cursor"></span>';
+				return;
+			}
+			var line = lines[i];
+			log.textContent = lines.slice(0, i).join('\n') + (i ? '\n' : '') + line.slice(0, c);
+			c++;
+			if (c <= line.length) {
+				setTimeout(typeLine, 16 + Math.random() * 24);
+			} else {
+				i++; c = 0;
+				setTimeout(typeLine, 220);
+			}
+		}
+		typeLine();
+	})();
+
+	// Title art is a static shipped asset (title.png) — if it's missing,
+	// fail quietly rather than showing a broken-image icon.
+	(function () {
+		var img = document.getElementById('term-title-img');
+		if (!img) return;
+		img.addEventListener('error', function () {
+			img.closest('.term-titlecard').classList.add('is-missing');
+		});
+	})();
+
+	// Tab switching for the source picker (local file vs. Jellyfin)
+	document.querySelectorAll('.term-tab').forEach(function (tab) {
+		tab.addEventListener('click', function () {
+			document.querySelectorAll('.term-tab').forEach(function (t) {
+				t.classList.remove('is-active');
+				t.setAttribute('aria-selected', 'false');
+			});
+			document.querySelectorAll('.term-pane').forEach(function (p) { p.classList.remove('is-active'); });
+			tab.classList.add('is-active');
+			tab.setAttribute('aria-selected', 'true');
+			document.querySelector('.term-pane[data-pane="' + tab.dataset.tab + '"]').classList.add('is-active');
+		});
+	});
+</script>
+
 </body>
 </html>
