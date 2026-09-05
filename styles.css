@@ -350,6 +350,44 @@ video::-webkit-media-controls-panel {
 	fill: currentColor;
 }
 
+/* Play/pause and mute/unmute stack their two icon states in the same
+   spot and crossfade between them, instead of an instant hidden/shown
+   snap — makes the state change unmistakable instead of "static". */
+#btn-playpause,
+#btn-mute {
+	position: relative;
+}
+
+#btn-playpause .icon,
+#btn-mute .icon {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%) scale(1);
+	opacity: 1;
+	transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+#btn-playpause .icon.is-hidden,
+#btn-mute .icon.is-hidden {
+	opacity: 0;
+	transform: translate(-50%, -50%) scale(0.5);
+	pointer-events: none;
+}
+
+/* Color the button itself, not just the icon shape, so "paused" and
+   "muted" read at a glance instead of relying on spotting a thin
+   glyph swap. */
+#btn-playpause.is-paused,
+#btn-mute.is-muted {
+	color: var(--red);
+}
+
+#btn-playpause.is-paused:hover,
+#btn-mute.is-muted:hover {
+	color: #000;
+}
+
 .pbar-skiplabel {
 	position: absolute;
 	bottom: 2px;
@@ -915,18 +953,19 @@ video::-webkit-media-controls-panel {
 }
 
 .term-go {
-	font-family: var(--font-mono);
-	font-weight: 700;
-	font-size: 14px;
-	text-transform: uppercase;
-	color: #fff;
-	background: var(--red);
-	border: 2px solid var(--ink);
-	border-radius: 0;
-	padding: 11px 20px;
-	cursor: pointer;
-	transition: transform 0.1s ease, box-shadow 0.1s ease;
-	box-shadow: 4px 4px 0px var(--cyan);
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 14px;
+    text-transform: uppercase;
+    color: #fff;
+    background: var(--red);
+    border: 2px solid var(--ink);
+    border-radius: 0;
+    padding: 11px 20px;
+    cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+    box-shadow: 4px 4px 0px var(--cyan);
 }
 
 .term-go:hover {

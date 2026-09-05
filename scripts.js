@@ -601,36 +601,126 @@ function togglePlayPause() {
 // need to ask for it in the UI.
 var JELLYFIN_ITEM_ID = '4ed68723f27b3717298751e5ed578a43';
 
+/* -----------------------------------------------------------------------
+   Jellyfin session + auth
+   Jellyfin expects every request — even ones carrying a valid token — to
+   identify the calling client via an X-Emby-Authorization header. A bare
+   ?api_key=... query param with no such header is what a static
+   Dashboard-generated API key gave us before, and it got rejected outright
+   (401) on this server. A real username/password login gets back a
+   per-session AccessToken and, paired with that header, is what actually
+   works against a real Jellyfin instance.
+------------------------------------------------------------------------ */
+var JELLYFIN_APP_NAME = 'BandersnatchPlayer';
+var JELLYFIN_APP_VERSION = '1.0.0';
+
+function jellyfinLoadSession() {
+	try { return JSON.parse(window.localStorage.getItem('jellyfin_session')) || {}; }
+	catch (e) { return {}; }
+}
+function jellyfinSaveSession(session) {
+	try { window.localStorage.setItem('jellyfin_session', JSON.stringify(session)); }
+	catch (e) {}
+}
+function jellyfinClearSession() {
+	try { window.localStorage.removeItem('jellyfin_session'); } catch (e) {}
+}
+
+var jellyfinSession = jellyfinLoadSession();
+if (!jellyfinSession.deviceId) {
+	jellyfinSession.deviceId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now() + Math.random());
+	jellyfinSaveSession(jellyfinSession);
+}
+
+function jellyfinAuthHeader() {
+	return 'MediaBrowser Client="' + JELLYFIN_APP_NAME + '", Device="Web", DeviceId="' +
+		jellyfinSession.deviceId + '", Version="' + JELLYFIN_APP_VERSION + '"';
+}
+
+// A page served over HTTPS (e.g. GitHub Pages) cannot fetch a plain HTTP
+// server — browsers block it as "mixed content" before the request even
+// leaves the machine. Checked up front so the error message says what's
+// actually wrong instead of a generic network failure.
+function jellyfinCheckMixedContent(server) {
+	if (location.protocol === 'https:' && /^http:\/\//i.test(server)) {
+		throw new Error(
+			'This page is loaded over HTTPS, so the browser blocks requests to a ' +
+			'plain HTTP server (mixed content). Put Jellyfin behind HTTPS ' +
+			'(a reverse proxy with a certificate works), or open this player ' +
+			'itself over HTTP/on your local network instead.'
+		);
+	}
+}
+
+// Generic authenticated Jellyfin request. Always sends the client-identity
+// header Jellyfin requires; sends the session token too once we have one.
+function jellyfinFetch(server, path, opts) {
+	opts = opts || {};
+	server = server.replace(/\/+$/, '');
+	jellyfinCheckMixedContent(server);
+	var headers = { 'Content-Type': 'application/json' };
+	headers['X-Emby-Authorization'] = jellyfinAuthHeader();
+	if (opts.token) headers['X-Emby-Token'] = opts.token;
+	return fetch(server + path, {
+		method: opts.method || 'GET',
+		headers: headers,
+		body: opts.body ? JSON.stringify(opts.body) : undefined
+	}).then(function (res) {
+		if (res.status === 401) {
+			throw new Error(opts.token
+				? 'Session expired or unauthorized (401) \u2014 please log in again.'
+				: 'Unauthorized (401) \u2014 check the username and password.');
+		}
+		if (!res.ok) throw new Error(opts.method + ' ' + path + ' \u2192 ' + res.status);
+		return res.text().then(function (text) { return text ? JSON.parse(text) : null; });
+	});
+}
+
+// Confirms a server is reachable (no auth needed) and returns its public info.
+function jellyfinPing(server) {
+	server = server.replace(/\/+$/, '');
+	jellyfinCheckMixedContent(server);
+	return fetch(server + '/System/Info/Public').then(function (res) {
+		if (!res.ok) throw new Error('Server responded with ' + res.status);
+		return res.json();
+	});
+}
+
+// Logs in with a username/password, returning { token, userId, username }.
+function jellyfinLogin(server, username, password) {
+	return jellyfinFetch(server, '/Users/AuthenticateByName', {
+		method: 'POST',
+		body: { Username: username, Pw: password }
+	}).then(function (result) {
+		return { token: result.AccessToken, userId: result.User.Id, username: result.User.Name };
+	});
+}
+
+// Looks up item metadata (media/subtitle streams) from Jellyfin, using the
+// logged-in session's token.
+function fetchJellyfinItem(server, itemId, token) {
+	return jellyfinFetch(server, '/Items/' + encodeURIComponent(itemId) + '?fields=MediaSources,MediaStreams', { token: token });
+}
+
 // Builds a direct-stream URL for a Jellyfin item.
 // Uses the "static" stream endpoint so the original file container/codec is
-// served as-is, which is what a plain <video> tag needs.
-function buildJellyfinUrl(server, itemId, apiKey) {
+// served as-is, which is what a plain <video> tag needs. <video>/<track>
+// elements can't send custom headers, so the session token travels as the
+// api_key query param here — that part was always fine; it's JSON calls
+// like the item lookup above that need the header too.
+function buildJellyfinUrl(server, itemId, token) {
 	server = server.replace(/\/+$/, '');
 	itemId = itemId.trim();
 	var url = server + '/Videos/' + encodeURIComponent(itemId) + '/stream?static=true';
-	if (apiKey)
-		url += '&api_key=' + encodeURIComponent(apiKey);
+	if (token)
+		url += '&api_key=' + encodeURIComponent(token);
 	return url;
-}
-
-// Looks up item metadata (poster art, media/subtitle streams) from Jellyfin.
-// Used both to confirm the server/item are reachable before auto-playing,
-// and to discover which subtitle streams exist so we can attach them.
-function fetchJellyfinItem(server, itemId, apiKey) {
-	server = server.replace(/\/+$/, '');
-	var url = server + '/Items/' + encodeURIComponent(itemId) + '?fields=MediaSources,MediaStreams';
-	if (apiKey)
-		url += '&api_key=' + encodeURIComponent(apiKey);
-	return fetch(url).then(function (res) {
-		if (!res.ok) throw new Error('Jellyfin item lookup failed (' + res.status + ')');
-		return res.json();
-	});
 }
 
 // Jellyfin will transcode any subtitle stream (embedded or external) to
 // WebVTT on request via this endpoint, which is what lets a plain <track>
 // element show them.
-function buildJellyfinSubtitleTracks(server, itemId, apiKey, itemData) {
+function buildJellyfinSubtitleTracks(server, itemId, token, itemData) {
 	server = server.replace(/\/+$/, '');
 	var source = (itemData.MediaSources && itemData.MediaSources[0]) || {};
 	var mediaSourceId = source.Id || itemId;
@@ -640,8 +730,8 @@ function buildJellyfinSubtitleTracks(server, itemId, apiKey, itemData) {
 		if (s.Type !== 'Subtitle') return;
 		var src = server + '/Videos/' + encodeURIComponent(itemId) + '/' +
 			encodeURIComponent(mediaSourceId) + '/Subtitles/' + s.Index + '/Stream.vtt';
-		if (apiKey)
-			src += '?api_key=' + encodeURIComponent(apiKey);
+		if (token)
+			src += '?api_key=' + encodeURIComponent(token);
 		tracks.push({
 			src: src,
 			label: s.DisplayTitle || s.Language || ('Subtitle ' + s.Index),
@@ -728,8 +818,9 @@ function setupPlayerBar(video) {
 	var wrapper = document.getElementById('wrapper-video');
 
 	function updatePlayPauseIcon() {
-		iconPlay.hidden = !video.paused;
-		iconPause.hidden = video.paused;
+		iconPlay.classList.toggle('is-hidden', !video.paused);
+		iconPause.classList.toggle('is-hidden', video.paused);
+		btnPlayPause.classList.toggle('is-paused', video.paused);
 	}
 
 	btnPlayPause.addEventListener('click', function () {
@@ -790,8 +881,9 @@ function setupPlayerBar(video) {
 
 	function updateMuteIcon() {
 		var muted = video.muted || video.volume === 0;
-		iconVolHigh.hidden = muted;
-		iconVolMuted.hidden = !muted;
+		iconVolHigh.classList.toggle('is-hidden', muted);
+		iconVolMuted.classList.toggle('is-hidden', !muted);
+		btnMute.classList.toggle('is-muted', muted);
 	}
 	btnMute.addEventListener('click', function () {
 		video.muted = !video.muted;
@@ -951,16 +1043,25 @@ window.onload = function() {
 		}, false);
 	})();
 
-	// Jellyfin playback
+	// Jellyfin playback: connect to a server, then log in with a real
+	// username/password (not a static API key — see the comments above
+	// jellyfinFetch for why that approach was rejected).
 	(function () {
-		var form = document.getElementById('jellyfin-form');
-		if (!form) return;
+		var connectForm = document.getElementById('jellyfin-connect-form');
+		var loginForm = document.getElementById('jellyfin-login-form');
+		if (!connectForm || !loginForm) return;
+
 		var serverInput = document.getElementById('jf-server');
-		var keyInput = document.getElementById('jf-apikey');
+		var connectErrorEl = document.getElementById('jf-connect-error');
+		var serverLabel = document.getElementById('jf-server-label');
+		var usernameInput = document.getElementById('jf-username');
+		var passwordInput = document.getElementById('jf-password');
 		var rememberInput = document.getElementById('jf-remember');
 		var errorEl = document.getElementById('jf-error');
+		var backBtn = document.getElementById('jf-back');
 		var jfLog = document.getElementById('jf-boot-log');
 		var itemId = JELLYFIN_ITEM_ID;
+		var currentServer = '';
 
 		function jfLine(text) {
 			if (!jfLog) return;
@@ -973,38 +1074,60 @@ window.onload = function() {
 			return new Promise(function (resolve) { setTimeout(resolve, ms); });
 		}
 
-		try {
-			var savedServer = window.localStorage.getItem('jellyfin_server');
-			var savedKey = window.localStorage.getItem('jellyfin_apikey');
-			if (savedServer) { serverInput.value = savedServer; rememberInput.checked = true; }
-			if (savedKey) keyInput.value = savedKey;
-		} catch (e) {}
+		function showLoginStep(server) {
+			currentServer = server;
+			serverLabel.textContent = server.replace(/^https?:\/\//, '');
+			connectForm.classList.add('hidden');
+			loginForm.classList.remove('hidden');
+			usernameInput.focus();
+		}
+		function showConnectStep() {
+			loginForm.classList.add('hidden');
+			connectForm.classList.remove('hidden');
+			serverInput.focus();
+		}
+		backBtn.addEventListener('click', showConnectStep);
 
-		// Three staged phases, each logged like a terminal session:
-		//   CONNECT  -> reach the server
-		//   LOCATE   -> confirm the title and pull its subtitle streams
-		//   AUTOPLAY -> hand off to the player, no extra click needed
-		function connect(server, apiKey, opts) {
-			opts = opts || {};
-			errorEl.textContent = '';
+		connectForm.addEventListener('submit', function (e) {
+			e.preventDefault();
+			connectErrorEl.textContent = '';
+			var server = serverInput.value.trim().replace(/\/+$/, '');
+			if (server && !/^https?:\/\//i.test(server)) server = 'http://' + server;
+			if (!server) {
+				connectErrorEl.textContent = 'Server URL is required.';
+				return;
+			}
 			jfReset();
-			jfLine('CONNECT  > ' + server + (opts.auto ? '  (remembered)' : ''));
+			jfLine('CONNECT  > ' + server);
+			jellyfinPing(server).then(function () {
+				jfLine('CONNECT  > ok');
+				showLoginStep(server);
+			}).catch(function (err) {
+				var message = (err && err.message) ? err.message : 'Could not reach that server.';
+				jfLine('CONNECT  > failed \u2014 ' + message);
+				connectErrorEl.textContent = message;
+			});
+		});
 
-			return fetchJellyfinItem(server, itemId, apiKey).then(function (itemData) {
+		// LOCATE (confirm the title + pull subtitle streams) then AUTOPLAY,
+		// once we have a valid session token for the server.
+		function playWithSession(server, token) {
+			errorEl.textContent = '';
+			jfLine('LOCATE   > looking up title\u2026');
+			return fetchJellyfinItem(server, itemId, token).then(function (itemData) {
 				var name = itemData.Name || 'title';
 				var year = itemData.ProductionYear ? ' (' + itemData.ProductionYear + ')' : '';
-				jfLine('CONNECT  > ok');
 				jfLine('LOCATE   > found "' + name + '"' + year);
 
-				var tracks = buildJellyfinSubtitleTracks(server, itemId, apiKey, itemData);
+				var tracks = buildJellyfinSubtitleTracks(server, itemId, token, itemData);
 				jfLine('LOCATE   > ' + tracks.length + ' subtitle track(s)');
 
 				return wait(300).then(function () {
 					jfLine('AUTOPLAY > starting stream\u2026');
 
-					var streamUrl = buildJellyfinUrl(server, itemId, apiKey);
+					var streamUrl = buildJellyfinUrl(server, itemId, token);
 					video_selector.onerror = function () {
-						errorEl.textContent = "Couldn't load that stream. Check the server URL, API key, and that the server is reachable from your browser (CORS/HTTPS included).";
+						errorEl.textContent = "Couldn't load that stream. The server accepted the login, but the video itself didn't play — check that the item ID matches your Bandersnatch file and that the format can direct-play in this browser.";
 						jfLine('AUTOPLAY > failed \u2014 stream did not load');
 						document.getElementById("wrapper-video").style.display = 'none';
 						file_selector.style.display = 'flex';
@@ -1016,46 +1139,59 @@ window.onload = function() {
 					return wait(250).then(startPlayback);
 				});
 			}).catch(function (err) {
-				console.log('Jellyfin connect failed', err);
-				jfLine('CONNECT  > failed \u2014 ' + (err && err.message ? err.message : 'unreachable'));
-				errorEl.textContent = "Couldn't reach that Jellyfin server. Check the server URL, API key, and that it's reachable from your browser (CORS/HTTPS included).";
+				console.log('Jellyfin playback failed', err);
+				var message = (err && err.message) ? err.message : "Couldn't load that title from Jellyfin.";
+				jfLine('LOCATE   > failed \u2014 ' + message);
+				errorEl.textContent = message;
 				file_selector.style.display = 'flex';
 				var jfTab = document.querySelector('.term-tab[data-tab="jellyfin"]');
 				if (jfTab) jfTab.click();
 			});
 		}
 
-		form.addEventListener('submit', function (e) {
+		loginForm.addEventListener('submit', function (e) {
 			e.preventDefault();
-
-			var server = serverInput.value.trim();
-			var apiKey = keyInput.value.trim();
-
-			if (!server) {
-				errorEl.textContent = 'Server URL is required.';
+			errorEl.textContent = '';
+			var username = usernameInput.value.trim();
+			var password = passwordInput.value;
+			if (!username) {
+				errorEl.textContent = 'Username is required.';
 				return;
 			}
-
-			if (rememberInput.checked) {
-				try {
-					window.localStorage.setItem('jellyfin_server', server);
-					window.localStorage.setItem('jellyfin_apikey', apiKey);
-				} catch (e) {}
-			} else {
-				try {
-					window.localStorage.removeItem('jellyfin_server');
-					window.localStorage.removeItem('jellyfin_apikey');
-				} catch (e) {}
-			}
-
-			connect(server, apiKey, { auto: false });
+			jfLine('LOGIN    > ' + username);
+			jellyfinLogin(currentServer, username, password).then(function (result) {
+				jfLine('LOGIN    > ok');
+				jellyfinSession.token = result.token;
+				jellyfinSession.userId = result.userId;
+				jellyfinSession.username = result.username;
+				if (rememberInput.checked) {
+					jellyfinSession.server = currentServer;
+					jellyfinSaveSession(jellyfinSession);
+				} else {
+					jellyfinClearSession();
+					// deviceId still needs to persist even when the rest doesn't,
+					// so Jellyfin sees a consistent device across visits.
+					jellyfinSaveSession({ deviceId: jellyfinSession.deviceId });
+				}
+				return playWithSession(currentServer, result.token);
+			}).catch(function (err) {
+				var message = (err && err.message) ? err.message : 'Login failed \u2014 check the username and password.';
+				jfLine('LOGIN    > failed \u2014 ' + message);
+				errorEl.textContent = message;
+			});
 		});
 
 		// This is your own personal deployment pointed at a single, known
-		// live server — if credentials were remembered, skip the click and
-		// go straight to playback.
-		if (video_source_selector.getAttribute("src") == '' && savedServer) {
-			connect(savedServer, savedKey || '', { auto: true });
+		// live server — if a session was remembered and still works, skip
+		// straight to playback with no clicks needed. If the token has
+		// expired, fall back to the login screen instead of a dead end.
+		if (video_source_selector.getAttribute("src") == '' && jellyfinSession.server && jellyfinSession.token) {
+			serverInput.value = jellyfinSession.server;
+			jfLine('CONNECT  > ' + jellyfinSession.server + '  (remembered)');
+			playWithSession(jellyfinSession.server, jellyfinSession.token).catch(function () {
+				// playWithSession already reports the error and reopens the tab;
+				// nothing further to do here.
+			});
 		}
 	})();
 
