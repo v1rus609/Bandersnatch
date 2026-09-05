@@ -12,10 +12,9 @@
 <script src="ru.js"></script>
 <script src="en.js"></script>
 <script src="fr.js"></script>
-<script src="SegmentMap.js"></script>
+<script src="segment-map.js"></script>
 <script src="scripts.js"></script>
 <script>
-	// keep localizable strings out of scripts.js
 	function askReset() {
 		if (confirm('Are you sure you want to reset all choices, breadcrumbs, and watched scenes?'))
 			reset();
@@ -25,7 +24,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" type="text/css" href="styles.css">
+<link rel="stylesheet" type="text/css" href="style.css">
 </head>
 
 <body>
@@ -45,8 +44,6 @@
 
 						<div class="term-body">
 							<pre class="boot-log" id="boot-log"></pre>
-
-							
 
 							<h1 class="term-h1 glitching" id="term-h1" data-text="SELECT.SOURCE">SELECT<span class="accent">.</span>SOURCE</h1>
 							<p class="term-sub">Every path was always going to lead here. Pick a feed &mdash; local file, or a Jellyfin server.</p>
@@ -79,6 +76,10 @@
 									<label class="term-field">
 										<span>Server URL</span>
 										<input type="text" id="jf-server" placeholder="https://jellyfin.example.com" spellcheck="false">
+									</label>
+									<label class="term-field">
+										<span>Item ID</span>
+										<input type="text" id="jf-itemid" placeholder="e.g. 4ed68723f27b3717298751e5ed578a43" spellcheck="false">
 									</label>
 									<button type="submit" class="term-go">Connect &rarr;</button>
 									<p class="term-error" id="jf-connect-error"></p>
@@ -134,7 +135,7 @@
 			</div>
 
 			<div id="wrapper-video" style="display: none;">
-				<video id="video" preload="metadata">
+				<video id="video" preload="metadata" crossorigin="anonymous">
 					<source id="video-source" src="">
 				</video>
 
@@ -201,12 +202,9 @@
 	var select = document.getElementById('choice-translation');
 	select.addEventListener('change', (e) => {
 		translated_choices = window[select.value];
-		console.log(select.value);
 		momentsBySegment = switch_choices();
 	});
 
-	// Terminal boot-log intro. Purely atmospheric — the real UI underneath
-	// is already usable while this plays.
 	(function () {
 		var log = document.getElementById('boot-log');
 		if (!log) return;
@@ -234,8 +232,6 @@
 		typeLine();
 	})();
 
-	// Title art is a static shipped asset (title.png) — if it's missing,
-	// fail quietly rather than showing a broken-image icon.
 	(function () {
 		var img = document.getElementById('term-title-img');
 		if (!img) return;
@@ -244,7 +240,6 @@
 		});
 	})();
 
-	// Tab switching for the source picker (local file vs. Jellyfin)
 	document.querySelectorAll('.term-tab').forEach(function (tab) {
 		tab.addEventListener('click', function () {
 			document.querySelectorAll('.term-tab').forEach(function (t) {
