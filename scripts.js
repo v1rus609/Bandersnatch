@@ -508,116 +508,63 @@ function togglePlayPause() {
 	else v.pause();
 }
 
-/* Jellyfin session + auth */
-var JELLYFIN_APP_NAME = 'BandersnatchPlayer';
-var JELLYFIN_APP_VERSION = '1.0.0';
-var DEFAULT_ITEM_ID = '4ed68723f27b3717298751e5ed578a43';
+/* =====================================================================
+   Jellyfin session + auth (ported from app.js)
+   ===================================================================== */
+var JF_LS_KEY = 'bsp.session';
 
-function jellyfinLoadSession() {
-	try { return JSON.parse(window.localStorage.getItem('jellyfin_session')) || {}; }
+function jfLoadSession() {
+	try { return JSON.parse(localStorage.getItem(JF_LS_KEY)) || {}; }
 	catch (e) { return {}; }
 }
-function jellyfinSaveSession(session) {
-	try { window.localStorage.setItem('jellyfin_session', JSON.stringify(session)); }
-	catch (e) {}
+function jfSaveSession(patch) {
+	var cur = jfLoadSession();
+	for (var k in patch) cur[k] = patch[k];
+	localStorage.setItem(JF_LS_KEY, JSON.stringify(cur));
 }
-function jellyfinClearSession() {
-	try { window.localStorage.removeItem('jellyfin_session'); } catch (e) {}
-}
+function jfClearSession() { localStorage.removeItem(JF_LS_KEY); }
 
-var jellyfinSession = jellyfinLoadSession();
+var jellyfinSession = jfLoadSession();
 if (!jellyfinSession.deviceId) {
 	jellyfinSession.deviceId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now() + Math.random());
-	jellyfinSaveSession(jellyfinSession);
+	jfSaveSession({ deviceId: jellyfinSession.deviceId });
 }
 
-function jellyfinAuthHeader() {
-	return 'MediaBrowser Client="' + JELLYFIN_APP_NAME + '", Device="Web", DeviceId="' +
-		jellyfinSession.deviceId + '", Version="' + JELLYFIN_APP_VERSION + '"';
+var JF_APP_NAME = 'BandersnatchPlayer';
+var JF_APP_VERSION = '1.0.0';
+var JF_DEFAULT_ITEM_ID = '4ed68723f27b3717298751e5ed578a43';
+
+function jfAuthHeader() {
+	return 'MediaBrowser Client="' + JF_APP_NAME + '", Device="Web", DeviceId="' +
+		jellyfinSession.deviceId + '", Version="' + JF_APP_VERSION + '"';
 }
 
-function jellyfinCheckMixedContent(server) {
-	if (location.protocol === 'https:' && /^http:\/\//i.test(server)) {
-		throw new Error(
-			'This page is loaded over HTTPS, so the browser blocks requests to an ' +
-			'unencrypted HTTP server (mixed content). Serve Jellyfin behind HTTPS ' +
-			'with CORS enabled.'
-		);
-	}
-}
-
-function jellyfinFetch(server, path, opts) {
+// Generic authenticated Jellyfin request helper, matching app.js's jf().
+function jf(path, opts) {
 	opts = opts || {};
-	server = server.replace(/\/+$/, '');
-	try {
-		jellyfinCheckMixedContent(server);
-	} catch (e) {
-		return Promise.reject(e);
-	}
+	var method = opts.method || 'GET';
+	var auth = opts.auth !== false;
 	var headers = { 'Content-Type': 'application/json' };
-	headers['X-Emby-Authorization'] = jellyfinAuthHeader();
-	if (opts.token) headers['X-Emby-Token'] = opts.token;
-	return fetch(server + path, {
-		method: opts.method || 'GET',
+	headers['X-Emby-Authorization'] = jfAuthHeader();
+	if (auth && jellyfinSession.token) headers['X-Emby-Token'] = jellyfinSession.token;
+	return fetch(jellyfinSession.server.replace(/\/+$/, '') + path, {
+		method: method,
 		headers: headers,
 		body: opts.body ? JSON.stringify(opts.body) : undefined
 	}).then(function (res) {
-		if (res.status === 401) {
-			throw new Error(opts.token
-				? 'Session expired or unauthorized (401) \u2014 please log in again.'
-				: 'Unauthorized (401) \u2014 check the username and password.');
-		}
-		if (!res.ok) throw new Error(opts.method + ' ' + path + ' \u2192 ' + res.status);
+		if (!res.ok) throw new Error(method + ' ' + path + ' -> ' + res.status);
 		return res.text().then(function (text) { return text ? JSON.parse(text) : null; });
 	});
 }
 
-function jellyfinPing(server) {
-	server = server.replace(/\/+$/, '');
-	try {
-		jellyfinCheckMixedContent(server);
-	} catch (e) {
-		return Promise.reject(e);
-	}
-	return fetch(server + '/System/Info/Public').then(function (res) {
-		if (!res.ok) throw new Error('Server responded with ' + res.status);
-		return res.json();
-	});
-}
-
-function jellyfinLogin(server, username, password) {
-	return jellyfinFetch(server, '/Users/AuthenticateByName', {
+// Same DeviceProfile / stream-resolution logic as app.js's startPlayback,
+// split into reusable pieces since this player takes an itemId directly
+// rather than an item object from a search result.
+function jfNegotiatePlayback(itemId) {
+	return jf('/Items/' + encodeURIComponent(itemId) + '/PlaybackInfo', {
 		method: 'POST',
-		body: { Username: username, Pw: password }
-	}).then(function (result) {
-		return { token: result.AccessToken, userId: result.User.Id, username: result.User.Name };
-	});
-}
-
-function fetchJellyfinItem(server, itemId, token) {
-	return jellyfinFetch(server, '/Items/' + encodeURIComponent(itemId) + '?fields=MediaSources,MediaStreams', { token: token });
-}
-
-// Asks Jellyfin to negotiate playback for THIS device/browser, the same way
-// Jellyfin's own web/mobile clients do. A naive "/stream?static=true" URL
-// only plays if this specific device's browser can natively decode the
-// source file's exact codec/container - it has no fallback. PlaybackInfo
-// tells Jellyfin what we can direct-play and lets it hand back an HLS
-// transcode URL instead when we can't, which is what actually makes this
-// work across different devices.
-function jellyfinPlaybackInfo(server, itemId, userId, token) {
-	server = server.replace(/\/+$/, '');
-	var path = '/Items/' + encodeURIComponent(itemId) + '/PlaybackInfo' + (userId ? '?userId=' + encodeURIComponent(userId) : '');
-	return jellyfinFetch(server, path, {
-		method: 'POST',
-		token: token,
 		body: {
-			UserId: userId,
-			// Wide, permissive profile so an ordinary MKV rip (h264/hevc +
-			// aac/ac3/dts, matroska container) qualifies for direct play -
-			// a narrow profile here is the #1 cause of a silent fallback
-			// to a low-quality transcode, or a device that can't play the
-			// source at all.
+			UserId: jellyfinSession.userId,
 			DeviceProfile: {
 				MaxStreamingBitrate: 800000000,
 				DirectPlayProfiles: [
@@ -643,44 +590,38 @@ function jellyfinPlaybackInfo(server, itemId, userId, token) {
 	});
 }
 
-// Resolves a PlaybackInfo response into an actual <video> src, choosing
-// direct-play when the device supports it and an HLS transcode otherwise.
-function resolveJellyfinStreamUrl(server, itemId, token, source) {
-	server = server.replace(/\/+$/, '');
+function jfResolveStreamUrl(itemId, source) {
+	var base = jellyfinSession.server.replace(/\/+$/, '');
 	if (source.SupportsDirectPlay) {
-		return server + '/Videos/' + encodeURIComponent(itemId) + '/stream?static=true' +
-			'&mediaSourceId=' + encodeURIComponent(source.Id) +
-			(token ? '&api_key=' + encodeURIComponent(token) : '');
+		return base + '/Videos/' + encodeURIComponent(itemId) + '/stream?static=true' +
+			'&mediaSourceId=' + encodeURIComponent(source.Id) + '&api_key=' + jellyfinSession.token;
 	}
 	if (source.TranscodingUrl) {
-		var url = source.TranscodingUrl.indexOf('http') === 0 ? source.TranscodingUrl : server + source.TranscodingUrl;
-		if (token && url.indexOf('api_key=') === -1)
-			url += (url.indexOf('?') === -1 ? '?' : '&') + 'api_key=' + encodeURIComponent(token);
+		var url = source.TranscodingUrl.indexOf('http') === 0 ? source.TranscodingUrl : base + source.TranscodingUrl;
+		if (url.indexOf('api_key=') === -1)
+			url += (url.indexOf('?') === -1 ? '?' : '&') + 'api_key=' + jellyfinSession.token;
 		return url;
 	}
-	return server + '/Videos/' + encodeURIComponent(itemId) + '/master.m3u8' +
-		'?mediaSourceId=' + encodeURIComponent(source.Id) +
-		(token ? '&api_key=' + encodeURIComponent(token) : '') +
+	return base + '/Videos/' + encodeURIComponent(itemId) + '/master.m3u8' +
+		'?mediaSourceId=' + encodeURIComponent(source.Id) + '&api_key=' + jellyfinSession.token +
 		'&VideoCodec=h264&AudioCodec=aac&MaxStreamingBitrate=120000000';
 }
 
-// Attaches a stream URL to the video element, using hls.js for an HLS
-// transcode URL when the browser can't play HLS natively (i.e. every
-// non-Safari browser), and a plain src assignment otherwise.
-function attachJellyfinStream(video, streamUrl) {
+// Attaches a resolved stream URL to the <video>, using hls.js for an HLS
+// transcode when the browser can't play HLS natively, exactly as app.js does.
+function jfAttachStream(video, streamUrl) {
 	if (video._hls) {
 		video._hls.destroy();
 		video._hls = null;
 	}
-	var isHls = streamUrl.indexOf('.m3u8') !== -1;
 	return new Promise(function (resolve, reject) {
-		if (isHls && !video.canPlayType('application/vnd.apple.mpegurl') && window.Hls && Hls.isSupported()) {
+		if (streamUrl.indexOf('.m3u8') !== -1 && !video.canPlayType('application/vnd.apple.mpegurl') && window.Hls) {
 			var hls = new Hls();
 			video._hls = hls;
 			hls.loadSource(streamUrl);
 			hls.attachMedia(video);
 			hls.on(Hls.Events.MANIFEST_PARSED, function () { resolve(); });
-			hls.on(Hls.Events.ERROR, function (_, data) { if (data.fatal) reject(new Error('HLS error: ' + data.type)); });
+			hls.on(Hls.Events.ERROR, function (_, data) { if (data.fatal) reject(data); });
 		} else {
 			video.src = streamUrl;
 			video.addEventListener('loadedmetadata', function onLoaded() {
@@ -695,25 +636,18 @@ function attachJellyfinStream(video, streamUrl) {
 	});
 }
 
-function buildJellyfinSubtitleTracks(server, itemId, token, source) {
-	server = server.replace(/\/+$/, '');
-	var mediaSourceId = (source && source.Id) || itemId;
-	var streams = (source && source.MediaStreams) || [];
-	var tracks = [];
-	streams.forEach(function (s) {
-		if (s.Type !== 'Subtitle') return;
-		var src = server + '/Videos/' + encodeURIComponent(itemId) + '/' +
-			encodeURIComponent(mediaSourceId) + '/Subtitles/' + s.Index + '/Stream.vtt';
-		if (token)
-			src += '?api_key=' + encodeURIComponent(token);
-		tracks.push({
-			src: src,
-			label: s.DisplayTitle || s.Language || ('Subtitle ' + s.Index),
-			srclang: s.Language || 'en',
+function jfSubtitleTracks(itemId, source) {
+	var base = jellyfinSession.server.replace(/\/+$/, '');
+	var streams = (source.MediaStreams || []).filter(function (s) { return s.Type === 'Subtitle'; });
+	return streams.map(function (s) {
+		return {
+			src: base + '/Videos/' + encodeURIComponent(itemId) + '/' + encodeURIComponent(source.Id) +
+				'/Subtitles/' + s.Index + '/Stream.vtt?api_key=' + jellyfinSession.token,
+			label: s.DisplayTitle || s.Language || ('Track ' + s.Index),
+			srclang: s.Language || 'und',
 			isDefault: !!s.IsDefault
-		});
+		};
 	});
-	return tracks;
 }
 
 function attachSubtitleTracks(video, tracks) {
@@ -1009,28 +943,21 @@ window.onload = function() {
 		var serverLabel = document.getElementById('jf-server-label');
 		var usernameInput = document.getElementById('jf-username');
 		var passwordInput = document.getElementById('jf-password');
-		var rememberInput = document.getElementById('jf-remember');
 		var errorEl = document.getElementById('jf-error');
 		var backBtn = document.getElementById('jf-back');
 		var jfLog = document.getElementById('jf-boot-log');
-		var currentServer = '';
-		var currentItemId = DEFAULT_ITEM_ID;
+		var currentItemId = JF_DEFAULT_ITEM_ID;
 
 		function jfLine(text) {
 			if (!jfLog) return;
 			jfLog.textContent += (jfLog.textContent ? '\n' : '') + text;
 		}
-		function jfReset() {
+		function jfLogReset() {
 			if (jfLog) jfLog.textContent = '';
 		}
-		function wait(ms) {
-			return new Promise(function (resolve) { setTimeout(resolve, ms); });
-		}
 
-		function showLoginStep(server, itemId) {
-			currentServer = server;
-			currentItemId = itemId || DEFAULT_ITEM_ID;
-			serverLabel.textContent = server.replace(/^https?:\/\//, '');
+		function showLoginStep(itemId) {
+			currentItemId = itemId || JF_DEFAULT_ITEM_ID;
 			connectForm.classList.add('hidden');
 			loginForm.classList.remove('hidden');
 			usernameInput.focus();
@@ -1042,66 +969,98 @@ window.onload = function() {
 		}
 		backBtn.addEventListener('click', showConnectStep);
 
+		// SCREEN 1 -> SCREEN 2, ported from app.js's formConnect submit handler:
+		// ping /System/Info/Public to validate the address before asking for
+		// credentials.
 		connectForm.addEventListener('submit', function (e) {
 			e.preventDefault();
 			connectErrorEl.textContent = '';
+			var btn = connectForm.querySelector('button');
+			btn.disabled = true;
 			var server = serverInput.value.trim().replace(/\/+$/, '');
+			if (!/^https?:\/\//i.test(server)) server = 'http://' + server;
 			var itemId = itemIdInput ? itemIdInput.value.trim() : '';
-			if (server && !/^https?:\/\//i.test(server)) server = 'http://' + server;
-			if (!server) {
-				connectErrorEl.textContent = 'Server URL is required.';
-				return;
-			}
-			jfReset();
-			jfLine('CONNECT  > ' + server);
-			jellyfinPing(server).then(function () {
-				jfLine('CONNECT  > ok');
-				showLoginStep(server, itemId);
-			}).catch(function (err) {
-				var message = (err && err.message) ? err.message : 'Could not reach that server.';
-				jfLine('CONNECT  > failed \u2014 ' + message);
-				connectErrorEl.textContent = message;
+			fetch(server + '/System/Info/Public').then(function (res) {
+				if (!res.ok) throw new Error('unreachable');
+				return res.json();
+			}).then(function (info) {
+				jellyfinSession.server = server;
+				jfSaveSession({ server: server });
+				jfLogReset();
+				serverLabel.textContent = (info.ServerName || 'JELLYFIN') + ' \u2014 ' + server.replace(/^https?:\/\//, '');
+				showLoginStep(itemId);
+			}).catch(function () {
+				connectErrorEl.textContent = 'CANNOT REACH SERVER. Check the address (include http:// or https://) and that this device can see it on the network.';
+			}).then(function () {
+				btn.disabled = false;
 			});
 		});
 
-		function playWithSession(server, token, itemId) {
-			itemId = itemId || currentItemId || DEFAULT_ITEM_ID;
+		// SCREEN 2 -> playback, ported from app.js's formLogin submit handler:
+		// AuthenticateByName, persist the session, then locate and play.
+		loginForm.addEventListener('submit', function (e) {
+			e.preventDefault();
 			errorEl.textContent = '';
-			jfLine('LOCATE   > looking up title\u2026');
-			return fetchJellyfinItem(server, itemId, token).then(function (itemData) {
-				var name = itemData.Name || 'title';
-				var year = itemData.ProductionYear ? ' (' + itemData.ProductionYear + ')' : '';
-				jfLine('LOCATE   > found "' + name + '"' + year);
+			var btn = loginForm.querySelector('button[type=submit]');
+			btn.disabled = true;
+			var Username = usernameInput.value.trim();
+			var Pw = passwordInput.value;
+			jf('/Users/AuthenticateByName', { method: 'POST', auth: false, body: { Username: Username, Pw: Pw } })
+				.then(function (result) {
+					jellyfinSession.token = result.AccessToken;
+					jellyfinSession.userId = result.User.Id;
+					jellyfinSession.username = result.User.Name;
+					jellyfinSession.itemId = currentItemId;
+					jfSaveSession({
+						token: jellyfinSession.token,
+						userId: jellyfinSession.userId,
+						username: jellyfinSession.username,
+						itemId: currentItemId
+					});
+					return playWithSession(currentItemId);
+				})
+				.catch(function () {
+					errorEl.textContent = 'LOGIN FAILED. Check your username and password.';
+				})
+				.then(function () {
+					btn.disabled = false;
+				});
+		});
 
+		// Same PlaybackInfo negotiation + stream/subtitle attach as app.js's
+		// startPlayback, just addressed by itemId instead of a search result.
+		function playWithSession(itemId) {
+			itemId = itemId || currentItemId || JF_DEFAULT_ITEM_ID;
+			errorEl.textContent = '';
+			jfLine('LOCATE   > looking up item ' + itemId + '\u2026');
+			return jf('/Items/' + encodeURIComponent(itemId) + '?fields=MediaSources,MediaStreams').then(function (itemData) {
+				jfLine('LOCATE   > found "' + (itemData.Name || itemId) + '"');
 				jfLine('LOCATE   > negotiating playback for this device\u2026');
-				return jellyfinPlaybackInfo(server, itemId, jellyfinSession.userId, token).then(function (playbackInfo) {
+				return jfNegotiatePlayback(itemId).then(function (playbackInfo) {
 					var source = playbackInfo.MediaSources && playbackInfo.MediaSources[0];
 					if (!source) throw new Error('Jellyfin returned no playable media source for this item.');
 
-					var tracks = buildJellyfinSubtitleTracks(server, itemId, token, source);
+					var tracks = jfSubtitleTracks(itemId, source);
 					jfLine('LOCATE   > ' + (source.SupportsDirectPlay ? 'direct play' : 'transcoding (HLS)') +
 						' \u2014 ' + tracks.length + ' subtitle track(s)');
+					jfLine('AUTOPLAY > starting stream\u2026');
 
-					return wait(200).then(function () {
-						jfLine('AUTOPLAY > starting stream\u2026');
+					var streamUrl = jfResolveStreamUrl(itemId, source);
+					video_selector.onerror = function () {
+						errorEl.textContent = "Couldn't load stream. Ensure the Item ID matches your server's file and CORS is enabled.";
+						jfLine('AUTOPLAY > failed \u2014 stream did not load');
+						document.getElementById("wrapper-video").style.display = 'none';
+						file_selector.style.display = 'flex';
+					};
 
-						var streamUrl = resolveJellyfinStreamUrl(server, itemId, token, source);
-						video_selector.onerror = function () {
-							errorEl.textContent = "Couldn't load stream. Ensure the Item ID matches your server's file and CORS is enabled.";
-							jfLine('AUTOPLAY > failed \u2014 stream did not load');
-							document.getElementById("wrapper-video").style.display = 'none';
-							file_selector.style.display = 'flex';
-						};
+					document.getElementById("wrapper-video").style.display = 'block';
 
-						document.getElementById("wrapper-video").style.display = 'block';
-
-						return attachJellyfinStream(video_selector, streamUrl).then(function () {
-							attachSubtitleTracks(video_selector, tracks);
-							return wait(150).then(startPlayback);
-						}).catch(function (err) {
-							video_selector.onerror();
-							throw err;
-						});
+					return jfAttachStream(video_selector, streamUrl).then(function () {
+						attachSubtitleTracks(video_selector, tracks);
+						startPlayback();
+					}).catch(function (err) {
+						video_selector.onerror();
+						throw err;
 					});
 				});
 			}).catch(function (err) {
@@ -1114,43 +1073,23 @@ window.onload = function() {
 			});
 		}
 
-		loginForm.addEventListener('submit', function (e) {
-			e.preventDefault();
-			errorEl.textContent = '';
-			var username = usernameInput.value.trim();
-			var password = passwordInput.value;
-			if (!username) {
-				errorEl.textContent = 'Username is required.';
-				return;
-			}
-			jfLine('LOGIN    > ' + username);
-			jellyfinLogin(currentServer, username, password).then(function (result) {
-				jfLine('LOGIN    > ok');
-				jellyfinSession.token = result.token;
-				jellyfinSession.userId = result.userId;
-				jellyfinSession.username = result.username;
-				jellyfinSession.itemId = currentItemId;
-				if (rememberInput.checked) {
-					jellyfinSession.server = currentServer;
-					jellyfinSaveSession(jellyfinSession);
-				} else {
-					jellyfinClearSession();
-					jellyfinSaveSession({ deviceId: jellyfinSession.deviceId });
-				}
-				return playWithSession(currentServer, result.token, currentItemId);
-			}).catch(function (err) {
-				var message = (err && err.message) ? err.message : 'Login failed \u2014 check credentials.';
-				jfLine('LOGIN    > failed \u2014 ' + message);
-				errorEl.textContent = message;
-			});
-		});
-
-		if (video_source_selector.getAttribute("src") == '' && jellyfinSession.server && jellyfinSession.token) {
+		// Boot: same logic as app.js's boot() — if we already have a full
+		// session, skip straight back into playback; if we only have a
+		// server, skip straight to the login step.
+		if (video_source_selector.getAttribute("src") == '' && jellyfinSession.server) {
 			serverInput.value = jellyfinSession.server;
 			if (itemIdInput && jellyfinSession.itemId) itemIdInput.value = jellyfinSession.itemId;
-			currentItemId = jellyfinSession.itemId || DEFAULT_ITEM_ID;
-			jfLine('CONNECT  > ' + jellyfinSession.server + '  (remembered)');
-			playWithSession(jellyfinSession.server, jellyfinSession.token, currentItemId).catch(function () {});
+			var jfTab = document.querySelector('.term-tab[data-tab="jellyfin"]');
+			if (jfTab) jfTab.click();
+			if (jellyfinSession.token && jellyfinSession.userId) {
+				jfLine('CONNECT  > ' + jellyfinSession.server + '  (remembered)');
+				playWithSession(jellyfinSession.itemId || JF_DEFAULT_ITEM_ID).catch(function () {});
+			} else {
+				fetch(jellyfinSession.server + '/System/Info/Public').then(function (res) { return res.json(); }).then(function (info) {
+					serverLabel.textContent = (info.ServerName || 'JELLYFIN') + ' \u2014 ' + jellyfinSession.server.replace(/^https?:\/\//, '');
+					showLoginStep(jellyfinSession.itemId);
+				}).catch(function () {});
+			}
 		}
 	})();
 
