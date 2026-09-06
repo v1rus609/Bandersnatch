@@ -73,12 +73,10 @@
 							</div>
 
 							<div class="term-pane" data-pane="jellyfin">
-								<pre class="boot-log" id="jf-boot-log"></pre>
-
 								<form id="jellyfin-connect-form" autocomplete="off">
 									<label class="term-field">
-										<span>Server address</span>
-										<input type="text" id="jf-server" placeholder="http://192.168.1.50:8096" spellcheck="false" autocomplete="url" required>
+										<span>Server URL</span>
+										<input type="text" id="jf-server" placeholder="https://jellyfin.example.com" spellcheck="false">
 									</label>
 									<label class="term-field">
 										<span>Item ID</span>
@@ -92,16 +90,23 @@
 									<p class="term-server-label" id="jf-server-label"></p>
 									<label class="term-field">
 										<span>Username</span>
-										<input type="text" id="jf-username" placeholder="Username" spellcheck="false" autocomplete="username" required>
+										<input type="text" id="jf-username" placeholder="Username" spellcheck="false" autocomplete="username">
 									</label>
 									<label class="term-field">
 										<span>Password</span>
 										<input type="password" id="jf-password" placeholder="Password" autocomplete="current-password">
 									</label>
-									<button type="submit" class="term-go">Authenticate &rarr;</button>
-									<button type="button" class="term-back" id="jf-back">&larr; different server</button>
+									<label class="term-check">
+										<input type="checkbox" id="jf-remember" checked>
+										<span>Stay logged in on this device</span>
+									</label>
+									<button type="submit" class="term-go">Log in &amp; play &rarr;</button>
+									<button type="button" class="term-back" id="jf-back" style="display: none;">← Different server</button>
 									<p class="term-error" id="jf-error"></p>
 								</form>
+
+								<pre class="boot-log" id="jf-boot-log"></pre>
+							</div>
 							</div>
 
 							<ul class="term-tips">
@@ -248,7 +253,6 @@
 			document.querySelector('.term-pane[data-pane="' + tab.dataset.tab + '"]').classList.add('is-active');
 		});
 	});
-
 </script>
 
 </body>
