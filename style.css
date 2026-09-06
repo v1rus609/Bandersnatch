@@ -8,7 +8,7 @@
    TOKENS
    TUCKERSOFT REMOTE TERMINAL, 1984. A harsh, high-contrast CRT computer:
    pure black, stark white borders, square corners, hard offset shadows
-   in red and cyan instead of soft blur, uppercase monospace labels.
+   in red and cyan insteadd of soft blur, uppercase monospace labels.
    No rounded corners, no gradients-as-decoration, no soft drop shadows —
    every edge is a deliberate hard line.
 ========================================================================== */
@@ -258,6 +258,12 @@ video::cue {
 #c:-webkit-full-screen, #c:-moz-full-screen, #c:-ms-fullscreen, #c:fullscreen {
 	width: 100vw;
 	height: 100vh;
+}
+
+#wrapper-video:-webkit-full-screen, #wrapper-video:-moz-full-screen, #wrapper-video:-ms-fullscreen, #wrapper-video:fullscreen {
+	width: 100vw;
+	height: 100vh;
+	background: #000;
 }
 
 section[role="banner"] {

@@ -1,4 +1,4 @@
-/* Data initialization */
+/* Data initializatiosn */
 var segmentMap = SegmentMap;
 var bv = bandersnatch.videos['80988062'].interactiveVideoMoments.value;
 var choicePoints = bv.choicePointNavigatorMetadata.choicePointsMetadata.choicePoints;
@@ -478,7 +478,10 @@ function jumpBack() {
 }
 
 function toggleFullScreen() {
-	var c = document.getElementById("c");
+	// Fullscreen the video wrapper itself (not the whole page/#c) — this is
+	// lighter for the browser to composite and avoids the "black until Esc"
+	// bug that shows up when fullscreening a large container.
+	var c = document.getElementById("wrapper-video");
 	if (!document.fullscreenElement && !document.mozFullScreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
 		if (c.requestFullscreen) {
 			c.requestFullscreen();
@@ -501,6 +504,22 @@ function toggleFullScreen() {
 		}
 	}
 }
+
+// Some browsers/GPU drivers fail to repaint the <video> frame the moment a
+// fullscreen transition completes, leaving the screen black until something
+// (like pressing Esc) forces a redraw. Forcing a tiny reflow right after the
+// transition works around that.
+function forceVideoRepaint() {
+	var video = document.getElementById("video");
+	if (!video) return;
+	var prevDisplay = video.style.display;
+	video.style.display = 'none';
+	void video.offsetHeight; // force reflow
+	video.style.display = prevDisplay;
+}
+['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(function (evt) {
+	document.addEventListener(evt, forceVideoRepaint);
+});
 
 function togglePlayPause() {
 	var v = document.getElementById("video");
