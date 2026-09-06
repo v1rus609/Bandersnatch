@@ -549,7 +549,11 @@ function jellyfinCheckMixedContent(server) {
 function jellyfinFetch(server, path, opts) {
 	opts = opts || {};
 	server = server.replace(/\/+$/, '');
-	jellyfinCheckMixedContent(server);
+	try {
+		jellyfinCheckMixedContent(server);
+	} catch (e) {
+		return Promise.reject(e);
+	}
 	var headers = { 'Content-Type': 'application/json' };
 	headers['X-Emby-Authorization'] = jellyfinAuthHeader();
 	if (opts.token) headers['X-Emby-Token'] = opts.token;
@@ -570,7 +574,11 @@ function jellyfinFetch(server, path, opts) {
 
 function jellyfinPing(server) {
 	server = server.replace(/\/+$/, '');
-	jellyfinCheckMixedContent(server);
+	try {
+		jellyfinCheckMixedContent(server);
+	} catch (e) {
+		return Promise.reject(e);
+	}
 	return fetch(server + '/System/Info/Public').then(function (res) {
 		if (!res.ok) throw new Error('Server responded with ' + res.status);
 		return res.json();
@@ -590,20 +598,107 @@ function fetchJellyfinItem(server, itemId, token) {
 	return jellyfinFetch(server, '/Items/' + encodeURIComponent(itemId) + '?fields=MediaSources,MediaStreams', { token: token });
 }
 
-function buildJellyfinUrl(server, itemId, token) {
+// Asks Jellyfin to negotiate playback for THIS device/browser, the same way
+// Jellyfin's own web/mobile clients do. A naive "/stream?static=true" URL
+// only plays if this specific device's browser can natively decode the
+// source file's exact codec/container - it has no fallback. PlaybackInfo
+// tells Jellyfin what we can direct-play and lets it hand back an HLS
+// transcode URL instead when we can't, which is what actually makes this
+// work across different devices.
+function jellyfinPlaybackInfo(server, itemId, userId, token) {
 	server = server.replace(/\/+$/, '');
-	itemId = itemId.trim();
-	var url = server + '/Videos/' + encodeURIComponent(itemId) + '/stream?static=true';
-	if (token)
-		url += '&api_key=' + encodeURIComponent(token);
-	return url;
+	var path = '/Items/' + encodeURIComponent(itemId) + '/PlaybackInfo' + (userId ? '?userId=' + encodeURIComponent(userId) : '');
+	return jellyfinFetch(server, path, {
+		method: 'POST',
+		token: token,
+		body: {
+			UserId: userId,
+			// Wide, permissive profile so an ordinary MKV rip (h264/hevc +
+			// aac/ac3/dts, matroska container) qualifies for direct play -
+			// a narrow profile here is the #1 cause of a silent fallback
+			// to a low-quality transcode, or a device that can't play the
+			// source at all.
+			DeviceProfile: {
+				MaxStreamingBitrate: 800000000,
+				DirectPlayProfiles: [
+					{
+						Container: 'mkv,matroska,webm,mp4,m4v,mov,avi,ts,mpegts',
+						Type: 'Video',
+						VideoCodec: 'h264,hevc,vp9,av1,vp8,mpeg4,mpeg2video',
+						AudioCodec: 'aac,ac3,eac3,dts,truehd,flac,mp3,opus,vorbis,pcm_s16le,pcm_s24le'
+					}
+				],
+				TranscodingProfiles: [
+					{
+						Container: 'ts', Type: 'Video', VideoCodec: 'h264', AudioCodec: 'aac',
+						Context: 'Streaming', Protocol: 'hls', MaxAudioChannels: '8'
+					}
+				],
+				SubtitleProfiles: [
+					{ Format: 'vtt', Method: 'External' },
+					{ Format: 'srt', Method: 'External' }
+				]
+			}
+		}
+	});
 }
 
-function buildJellyfinSubtitleTracks(server, itemId, token, itemData) {
+// Resolves a PlaybackInfo response into an actual <video> src, choosing
+// direct-play when the device supports it and an HLS transcode otherwise.
+function resolveJellyfinStreamUrl(server, itemId, token, source) {
 	server = server.replace(/\/+$/, '');
-	var source = (itemData.MediaSources && itemData.MediaSources[0]) || {};
-	var mediaSourceId = source.Id || itemId;
-	var streams = source.MediaStreams || itemData.MediaStreams || [];
+	if (source.SupportsDirectPlay) {
+		return server + '/Videos/' + encodeURIComponent(itemId) + '/stream?static=true' +
+			'&mediaSourceId=' + encodeURIComponent(source.Id) +
+			(token ? '&api_key=' + encodeURIComponent(token) : '');
+	}
+	if (source.TranscodingUrl) {
+		var url = source.TranscodingUrl.indexOf('http') === 0 ? source.TranscodingUrl : server + source.TranscodingUrl;
+		if (token && url.indexOf('api_key=') === -1)
+			url += (url.indexOf('?') === -1 ? '?' : '&') + 'api_key=' + encodeURIComponent(token);
+		return url;
+	}
+	return server + '/Videos/' + encodeURIComponent(itemId) + '/master.m3u8' +
+		'?mediaSourceId=' + encodeURIComponent(source.Id) +
+		(token ? '&api_key=' + encodeURIComponent(token) : '') +
+		'&VideoCodec=h264&AudioCodec=aac&MaxStreamingBitrate=120000000';
+}
+
+// Attaches a stream URL to the video element, using hls.js for an HLS
+// transcode URL when the browser can't play HLS natively (i.e. every
+// non-Safari browser), and a plain src assignment otherwise.
+function attachJellyfinStream(video, streamUrl) {
+	if (video._hls) {
+		video._hls.destroy();
+		video._hls = null;
+	}
+	var isHls = streamUrl.indexOf('.m3u8') !== -1;
+	return new Promise(function (resolve, reject) {
+		if (isHls && !video.canPlayType('application/vnd.apple.mpegurl') && window.Hls && Hls.isSupported()) {
+			var hls = new Hls();
+			video._hls = hls;
+			hls.loadSource(streamUrl);
+			hls.attachMedia(video);
+			hls.on(Hls.Events.MANIFEST_PARSED, function () { resolve(); });
+			hls.on(Hls.Events.ERROR, function (_, data) { if (data.fatal) reject(new Error('HLS error: ' + data.type)); });
+		} else {
+			video.src = streamUrl;
+			video.addEventListener('loadedmetadata', function onLoaded() {
+				video.removeEventListener('loadedmetadata', onLoaded);
+				resolve();
+			});
+			video.addEventListener('error', function onErr(e) {
+				video.removeEventListener('error', onErr);
+				reject(e);
+			}, { once: true });
+		}
+	});
+}
+
+function buildJellyfinSubtitleTracks(server, itemId, token, source) {
+	server = server.replace(/\/+$/, '');
+	var mediaSourceId = (source && source.Id) || itemId;
+	var streams = (source && source.MediaStreams) || [];
 	var tracks = [];
 	streams.forEach(function (s) {
 		if (s.Type !== 'Subtitle') return;
@@ -978,24 +1073,36 @@ window.onload = function() {
 				var year = itemData.ProductionYear ? ' (' + itemData.ProductionYear + ')' : '';
 				jfLine('LOCATE   > found "' + name + '"' + year);
 
-				var tracks = buildJellyfinSubtitleTracks(server, itemId, token, itemData);
-				jfLine('LOCATE   > ' + tracks.length + ' subtitle track(s)');
+				jfLine('LOCATE   > negotiating playback for this device\u2026');
+				return jellyfinPlaybackInfo(server, itemId, jellyfinSession.userId, token).then(function (playbackInfo) {
+					var source = playbackInfo.MediaSources && playbackInfo.MediaSources[0];
+					if (!source) throw new Error('Jellyfin returned no playable media source for this item.');
 
-				return wait(300).then(function () {
-					jfLine('AUTOPLAY > starting stream\u2026');
+					var tracks = buildJellyfinSubtitleTracks(server, itemId, token, source);
+					jfLine('LOCATE   > ' + (source.SupportsDirectPlay ? 'direct play' : 'transcoding (HLS)') +
+						' \u2014 ' + tracks.length + ' subtitle track(s)');
 
-					var streamUrl = buildJellyfinUrl(server, itemId, token);
-					video_selector.onerror = function () {
-						errorEl.textContent = "Couldn't load stream. Ensure the Item ID matches your server's file and CORS is enabled.";
-						jfLine('AUTOPLAY > failed \u2014 stream did not load');
-						document.getElementById("wrapper-video").style.display = 'none';
-						file_selector.style.display = 'flex';
-					};
-					attachSubtitleTracks(video_selector, tracks);
-					video_selector.src = streamUrl;
-					document.getElementById("wrapper-video").style.display = 'block';
+					return wait(200).then(function () {
+						jfLine('AUTOPLAY > starting stream\u2026');
 
-					return wait(250).then(startPlayback);
+						var streamUrl = resolveJellyfinStreamUrl(server, itemId, token, source);
+						video_selector.onerror = function () {
+							errorEl.textContent = "Couldn't load stream. Ensure the Item ID matches your server's file and CORS is enabled.";
+							jfLine('AUTOPLAY > failed \u2014 stream did not load');
+							document.getElementById("wrapper-video").style.display = 'none';
+							file_selector.style.display = 'flex';
+						};
+
+						document.getElementById("wrapper-video").style.display = 'block';
+
+						return attachJellyfinStream(video_selector, streamUrl).then(function () {
+							attachSubtitleTracks(video_selector, tracks);
+							return wait(150).then(startPlayback);
+						}).catch(function (err) {
+							video_selector.onerror();
+							throw err;
+						});
+					});
 				});
 			}).catch(function (err) {
 				var message = (err && err.message) ? err.message : "Couldn't load that title from Jellyfin.";
